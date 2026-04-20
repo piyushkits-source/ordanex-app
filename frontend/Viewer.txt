@@ -1,0 +1,345 @@
+Great — now we’ll design this properly like a production SaaS product, not just a UI hack.
+
+You’re essentially building the core differentiator of your platform here.
+
+
+
+
+🧠 Final Architecture: Document Viewer Framework
+
+
+We will build a plug-and-play viewer system:
+DocumentViewer
+ ├── PdfRenderer        (pdf.js + bounding boxes)
+ ├── ImageRenderer      (canvas + boxes)
+ ├── SpreadsheetRenderer (grid + cell highlight)
+ ├── EdiRenderer        (raw + parsed view)
+ ├── WordRenderer       (HTML preview)
+
+
+
+
+📁 Folder Structure (React)
+
+
+Create this inside your src/:
+src/
+ ├── components/
+ │   └── viewer/
+ │       ├── DocumentViewer.tsx
+ │       ├── PdfRenderer.tsx
+ │       ├── ImageRenderer.tsx
+ │       ├── SpreadsheetRenderer.tsx
+ │       ├── EdiRenderer.tsx
+ │       ├── WordRenderer.tsx
+ │       └── viewerUtils.ts
+
+
+
+
+🚀 1. DocumentViewer.tsx (MAIN ENGINE)
+
+import PdfRenderer from "./PdfRenderer";
+import ImageRenderer from "./ImageRenderer";
+import SpreadsheetRenderer from "./SpreadsheetRenderer";
+import EdiRenderer from "./EdiRenderer";
+import WordRenderer from "./WordRenderer";
+
+export default function DocumentViewer({
+  file,
+  boxes,
+  selectedField,
+  onSelectField,
+}: any) {
+
+  if (!file) return <div className="empty-box">No file available</div>;
+
+  const type = resolveViewerType(file.original_file_name);
+
+  switch (type) {
+    case "pdf":
+      return <PdfRenderer {...{ file, boxes, selectedField, onSelectField }} />;
+
+    case "image":
+      return <ImageRenderer {...{ file, boxes, selectedField, onSelectField }} />;
+
+    case "spreadsheet":
+      return <SpreadsheetRenderer file={file} />;
+
+    case "edi":
+      return <EdiRenderer file={file} />;
+
+    case "word":
+      return <WordRenderer file={file} />;
+
+    default:
+      return <div className="empty-box">Unsupported format</div>;
+  }
+}
+
+function resolveViewerType(name: string) {
+  const ext = name?.toLowerCase().split(".").pop();
+
+  if (["pdf"].includes(ext)) return "pdf";
+  if (["png", "jpg", "jpeg", "tiff"].includes(ext)) return "image";
+  if (["xls", "xlsx", "csv"].includes(ext)) return "spreadsheet";
+  if (["doc", "docx"].includes(ext)) return "word";
+  if (["edi", "txt"].includes(ext)) return "edi";
+
+  return "unknown";
+}
+
+
+
+
+📄 2. PdfRenderer.tsx (CORE FEATURE)
+
+
+👉 This is your most important component
+
+Install:
+npm install react-pdf
+import { Document, Page } from "react-pdf";
+import { useState } from "react";
+
+export default function PdfRenderer({
+  file,
+  boxes = [],
+  selectedField,
+  onSelectField,
+}: any) {
+
+  const [numPages, setNumPages] = useState(1);
+
+  const fileUrl = `/api/files/${file.file_id}/download`;
+
+  return (
+    <div className="pdf-viewer-shell">
+
+      <Document file={fileUrl} onLoadSuccess={(pdf) => setNumPages(pdf.numPages)}>
+        {Array.from(new Array(numPages), (_, i) => (
+          <div key={i} className="pdf-page">
+            <Page pageNumber={i + 1} width={800} />
+
+            {/* Bounding Boxes */}
+            <div className="bbox-overlay">
+              {boxes
+                .filter((b: any) => b.page === i + 1)
+                .map((box: any, idx: number) => (
+                  <div
+                    key={idx}
+                    className={`bbox ${selectedField === box.field_name ? "selected" : ""}`}
+                    style={{
+                      left: box.x,
+                      top: box.y,
+                      width: box.width,
+                      height: box.height,
+                    }}
+                    onClick={() => onSelectField(box.field_name)}
+                  />
+                ))}
+            </div>
+
+          </div>
+        ))}
+      </Document>
+    </div>
+  );
+}
+
+
+
+
+🖼 3. ImageRenderer.tsx
+
+export default function ImageRenderer({
+  file,
+  boxes = [],
+  selectedField,
+  onSelectField,
+}: any) {
+
+  const fileUrl = `/api/files/${file.file_id}/download`;
+
+  return (
+    <div className="image-viewer">
+      <img src={fileUrl} alt="doc" />
+
+      <div className="bbox-overlay">
+        {boxes.map((box: any, i: number) => (
+          <div
+            key={i}
+            className={`bbox ${selectedField === box.field_name ? "selected" : ""}`}
+            style={{
+              left: box.x,
+              top: box.y,
+              width: box.width,
+              height: box.height,
+            }}
+            onClick={() => onSelectField(box.field_name)}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+
+
+
+📊 4. SpreadsheetRenderer.tsx
+
+import { useEffect, useState } from "react";
+
+export default function SpreadsheetRenderer({ file }: any) {
+  const [data, setData] = useState<any[]>([]);
+
+  useEffect(() => {
+    fetch(`/api/files/${file.file_id}/preview`)
+      .then((r) => r.json())
+      .then(setData);
+  }, []);
+
+  return (
+    <div className="table-wrap">
+      <table className="items-table">
+        <tbody>
+          {data.map((row, i) => (
+            <tr key={i}>
+              {Object.values(row).map((cell: any, j) => (
+                <td key={j}>{cell}</td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+
+
+
+📄 5. EdiRenderer.tsx
+
+import { useEffect, useState } from "react";
+
+export default function EdiRenderer({ file }: any) {
+  const [text, setText] = useState("");
+
+  useEffect(() => {
+    fetch(`/api/files/${file.file_id}/download`)
+      .then((r) => r.text())
+      .then(setText);
+  }, []);
+
+  return (
+    <div className="edi-view">
+      <pre>{text}</pre>
+    </div>
+  );
+}
+
+
+
+
+📄 6. WordRenderer.tsx
+
+export default function WordRenderer({ file }: any) {
+  return (
+    <iframe
+      src={`/api/files/${file.file_id}/preview`}
+      className="pdf-frame"
+    />
+  );
+}
+
+
+
+
+🎨 CSS ADDITIONS
+
+
+Add:
+.pdf-viewer-shell, .image-viewer {
+  position: relative;
+}
+
+.pdf-page {
+  position: relative;
+  margin-bottom: 16px;
+}
+
+.bbox-overlay {
+  position: absolute;
+  inset: 0;
+}
+
+.bbox {
+  position: absolute;
+  border: 2px solid orange;
+  background: rgba(255,165,0,0.15);
+  cursor: pointer;
+}
+
+.bbox.selected {
+  border-color: blue;
+  background: rgba(0,0,255,0.2);
+}
+
+
+
+
+🔥 What you just built
+
+
+You now have:
+
+✔ Multi-format document viewer
+✔ Bounding box system (PDF + Image)
+✔ Extensible architecture
+✔ Enterprise-grade UI capability
+
+
+
+
+🚀 Next (HIGH IMPACT)
+
+
+Now your system becomes very powerful if we add:
+
+
+1. Field ↔ Box Sync
+
+
+Click field → highlight box
+Click box → highlight field
+
+
+2. Auto-scroll to field
+
+
+
+3. Confidence heatmap
+
+
+
+4. Vendor learning overlay
+
+
+
+
+
+My recommendation
+
+
+Next step should be:
+
+👉 “Field-to-Box Sync + Smart Highlighting”
+
+That will make your product look like:
+👉 SAP AI + UiPath + Rossum combined
+
+
+
+If you want, I’ll build that next step fully integrated.

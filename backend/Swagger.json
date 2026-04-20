@@ -1,0 +1,158 @@
+{
+  "client_id": "DOW",
+  "sold_to": "2011009253",
+  "ship_to": "INSULECTRO LONDON",
+  "similarity_threshold": 0.72,
+  "parsed_docs": [
+    {
+      "header": {
+        "po_number": "PO01-001405",
+        "supplier": "CCI EUROLAM SA",
+        "currency": "EUR"
+      },
+      "items": [
+        {
+          "material": "045236",
+          "description": "Aurostrike SAG Replenisher A",
+          "quantity": 1,
+          "uom": "EA",
+          "unit_price": 29.72,
+          "amount": 118.88
+        }
+      ],
+      "parser_meta": {
+        "layout_signature": "vendor_a_sig_01",
+        "layout_page": 1,
+        "source_used": "LAYOUT",
+        "final_item_count": 1,
+        "field_columns": {
+          "material": {
+            "x_start": 70,
+            "x_end": 130,
+            "x_mid": 100
+          },
+          "description": {
+            "x_start": 150,
+            "x_end": 360,
+            "x_mid": 255
+          },
+          "quantity": {
+            "x_start": 400,
+            "x_end": 450,
+            "x_mid": 425
+          },
+          "unit_price": {
+            "x_start": 470,
+            "x_end": 540,
+            "x_mid": 505
+          },
+          "amount": {
+            "x_start": 560,
+            "x_end": 640,
+            "x_mid": 600
+          }
+        }
+      }
+    },
+    {
+      "header": {
+        "po_number": "PO01-001406",
+        "supplier": "CCI EUROLAM SA",
+        "currency": "EUR"
+      },
+      "items": [
+        {
+          "material": "069518",
+          "description": "Aurostrike SAG Replenisher B",
+          "quantity": 4,
+          "uom": "EA",
+          "unit_price": 157.30,
+          "amount": 629.20
+        }
+      ],
+      "parser_meta": {
+        "layout_signature": "vendor_a_sig_01",
+        "layout_page": 1,
+        "source_used": "LAYOUT",
+        "final_item_count": 1,
+        "field_columns": {
+          "material": {
+            "x_start": 72,
+            "x_end": 132,
+            "x_mid": 102
+          },
+          "description": {
+            "x_start": 152,
+            "x_end": 362,
+            "x_mid": 257
+          },
+          "quantity": {
+            "x_start": 402,
+            "x_end": 452,
+            "x_mid": 427
+          },
+          "unit_price": {
+            "x_start": 472,
+            "x_end": 542,
+            "x_mid": 507
+          },
+          "amount": {
+            "x_start": 562,
+            "x_end": 642,
+            "x_mid": 602
+          }
+        }
+      }
+    },
+    {
+      "header": {
+        "po_number": "100444603",
+        "supplier": "INSULECTRO",
+        "currency": "USD"
+      },
+      "items": [
+        {
+          "material": "CHDPROSMTCAC-020LT",
+          "description": "Metal Adder Gold",
+          "quantity": 1,
+          "uom": "EA",
+          "unit_price": 1601.22,
+          "amount": 1601.22
+        }
+      ],
+      "parser_meta": {
+        "layout_signature": "vendor_b_sig_99",
+        "layout_page": 1,
+        "source_used": "AI",
+        "final_item_count": 1,
+        "field_columns": {
+          "material": {
+            "x_start": 95,
+            "x_end": 200,
+            "x_mid": 147
+          },
+          "description": {
+            "x_start": 210,
+            "x_end": 420,
+            "x_mid": 315
+          },
+          "quantity": {
+            "x_start": 435,
+            "x_end": 480,
+            "x_mid": 457
+          },
+          "unit_price": {
+            "x_start": 500,
+            "x_end": 575,
+            "x_mid": 537
+          },
+          "amount": {
+            "x_start": 590,
+            "x_end": 670,
+            "x_mid": 630
+          }
+        }
+      }
+    }
+  ]
+}

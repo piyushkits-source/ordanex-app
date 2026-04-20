@@ -1,0 +1,1 @@
+export type EnvironmentType = "STAGING" | "PROD";

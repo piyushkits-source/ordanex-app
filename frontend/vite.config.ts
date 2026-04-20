@@ -1,0 +1,60 @@
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+import path from "path";
+
+export default defineConfig({
+  plugins: [react()],
+  resolve: {
+    alias: {
+      app: path.resolve(__dirname, "./src/app"),
+      pages: path.resolve(__dirname, "./src/pages"),
+      components: path.resolve(__dirname, "./src/components"),
+      context: path.resolve(__dirname, "./src/context"),
+      utils: path.resolve(__dirname, "./src/utils"),
+      types: path.resolve(__dirname, "./src/types"),
+      styles: path.resolve(__dirname, "./src/styles"),
+    },
+  },
+  server: {
+    port: 5173,
+    strictPort: false,
+    proxy: {
+      // Proxy every backend route to FastAPI
+      "/auth":               { target: "http://localhost:8000", changeOrigin: true },
+      "/trading-partners":   { target: "http://localhost:8000", changeOrigin: true },
+      "/trading-partners-agentic": { target: "http://localhost:8000", changeOrigin: true },
+      "/clients":            { target: "http://localhost:8000", changeOrigin: true },
+      "/client-config":      { target: "http://localhost:8000", changeOrigin: true },
+      "/users":              { target: "http://localhost:8000", changeOrigin: true },
+      "/purchase-orders":    { target: "http://localhost:8000", changeOrigin: true },
+      "/jobs":               { target: "http://localhost:8000", changeOrigin: true },
+      "/files":              { target: "http://localhost:8000", changeOrigin: true },
+      "/file-upload":        { target: "http://localhost:8000", changeOrigin: true },
+      "/xml":                { target: "http://localhost:8000", changeOrigin: true },
+      "/email-ops":          { target: "http://localhost:8000", changeOrigin: true },
+      "/mapping-profiles":   { target: "http://localhost:8000", changeOrigin: true },
+      "/onboarding":         { target: "http://localhost:8000", changeOrigin: true },
+      "/document-intelligence": { target: "http://localhost:8000", changeOrigin: true },
+      "/ai-learning":        { target: "http://localhost:8000", changeOrigin: true },
+      "/sla":                { target: "http://localhost:8000", changeOrigin: true },
+      "/vendor-learning":    { target: "http://localhost:8000", changeOrigin: true },
+      "/processing-trace":   { target: "http://localhost:8000", changeOrigin: true },
+      "/release":            { target: "http://localhost:8000", changeOrigin: true },
+      "/outbound":           { target: "http://localhost:8000", changeOrigin: true },
+      "/outbound-monitor":   { target: "http://localhost:8000", changeOrigin: true },
+      "/outbound-queue":     { target: "http://localhost:8000", changeOrigin: true },
+      "/monitoring":         { target: "http://localhost:8000", changeOrigin: true },
+      "/monitoring-dashboard": { target: "http://localhost:8000", changeOrigin: true },
+      "/realtime":           { target: "http://localhost:8000", changeOrigin: true },
+      "/address-master":     { target: "http://localhost:8000", changeOrigin: true },
+      "/execution":          { target: "http://localhost:8000", changeOrigin: true },
+      "/message-flows":      { target: "http://localhost:8000", changeOrigin: true },
+      "/message-canonical":  { target: "http://localhost:8000", changeOrigin: true },
+      "/parser-profiles":    { target: "http://localhost:8000", changeOrigin: true },
+      "/replay":             { target: "http://localhost:8000", changeOrigin: true },
+      "/polling-admin":      { target: "http://localhost:8000", changeOrigin: true },
+      "/partner-onboarding": { target: "http://localhost:8000", changeOrigin: true },
+      "/ai-onboarding":      { target: "http://localhost:8000", changeOrigin: true },
+    },
+  },
+});

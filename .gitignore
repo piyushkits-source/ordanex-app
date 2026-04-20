@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+venv/
+env/
+.env
+*.env
+!.env.example
+
+# Node
+node_modules/
+dist/
+.vite/
+*.log
+
+# Celery runtime state
+celerybeat-schedule
+celerybeat-schedule-shm
+celerybeat-schedule-wal
+
+# Backup files
+*.bak
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Uploads (depending on your policy — you may want to keep these)
+# backend/data/uploads/*/
+backend/.env

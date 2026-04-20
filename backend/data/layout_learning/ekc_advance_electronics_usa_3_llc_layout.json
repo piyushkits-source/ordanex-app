@@ -1,0 +1,78 @@
+{
+  "vendor": "EKC ADVANCE ELECTRONICS USA 3, LLC",
+  "column_x_ranges": {
+    "line_no": {
+      "x_start": 40,
+      "x_end": 520,
+      "x_mid": 280.0
+    },
+    "material": {
+      "x_start": 40,
+      "x_end": 520,
+      "x_mid": 280.0
+    },
+    "description": {
+      "x_start": 40,
+      "x_end": 520,
+      "x_mid": 280.0
+    },
+    "delivery_date": {
+      "x_start": 40,
+      "x_end": 520,
+      "x_mid": 280.0
+    },
+    "quantity": {
+      "x_start": 40,
+      "x_end": 520,
+      "x_mid": 280.0
+    },
+    "uom": {
+      "x_start": 40,
+      "x_end": 520,
+      "x_mid": 280.0
+    },
+    "unit_price": {
+      "x_start": 40,
+      "x_end": 520,
+      "x_mid": 280.0
+    },
+    "amount": {
+      "x_start": 40,
+      "x_end": 520,
+      "x_mid": 280.0
+    }
+  },
+  "header_hints": {
+    "line_no": [
+      "date"
+    ],
+    "material": [
+      "date"
+    ],
+    "description": [
+      "date"
+    ],
+    "delivery_date": [
+      "date"
+    ],
+    "quantity": [
+      "date"
+    ],
+    "uom": [
+      "date"
+    ],
+    "unit_price": [
+      "date"
+    ],
+    "amount": [
+      "date"
+    ]
+  },
+  "layout_signatures": [
+    "EKC ADVANCE ELECTRONICS USA 3, LLC_P1_1_0"
+  ],
+  "preferred_page_regions": {
+    "table_page": 1
+  },
+  "last_updated": "2026-03-31 21:27:18.276186+00:00"
+}

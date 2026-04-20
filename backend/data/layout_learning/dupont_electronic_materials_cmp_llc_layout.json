@@ -1,0 +1,102 @@
+{
+  "vendor": "DuPont Electronic Materials CMP, LLC",
+  "column_x_ranges": {
+    "line_no": {
+      "x_start": 20,
+      "x_end": 200,
+      "x_mid": 110.0
+    },
+    "material": {
+      "x_start": 20,
+      "x_end": 200,
+      "x_mid": 110.0
+    },
+    "quantity": {
+      "x_start": 240,
+      "x_end": 440,
+      "x_mid": 340.0
+    },
+    "uom": {
+      "x_start": 240,
+      "x_end": 440,
+      "x_mid": 340.0
+    },
+    "unit_price": {
+      "x_start": 240,
+      "x_end": 440,
+      "x_mid": 340.0
+    },
+    "amount": {
+      "x_start": 480,
+      "x_end": 500,
+      "x_mid": 490.0
+    },
+    "description": {
+      "x_start": 20,
+      "x_end": 200,
+      "x_mid": 110.0
+    },
+    "delivery_date": {
+      "x_start": 20,
+      "x_end": 200,
+      "x_mid": 110.0
+    }
+  },
+  "header_hints": {
+    "line_no": [
+      "item",
+      "qty",
+      "unit",
+      "price"
+    ],
+    "material": [
+      "item",
+      "qty",
+      "unit",
+      "price"
+    ],
+    "description": [
+      "item",
+      "qty",
+      "unit",
+      "price"
+    ],
+    "delivery_date": [
+      "item",
+      "qty",
+      "unit",
+      "price"
+    ],
+    "quantity": [
+      "item",
+      "qty",
+      "unit",
+      "price"
+    ],
+    "uom": [
+      "item",
+      "qty",
+      "unit",
+      "price"
+    ],
+    "unit_price": [
+      "item",
+      "qty",
+      "unit",
+      "price"
+    ],
+    "amount": [
+      "item",
+      "qty",
+      "unit",
+      "price"
+    ]
+  },
+  "layout_signatures": [
+    "DuPont Electronic Materials CMP, LLC_P1_3_0"
+  ],
+  "preferred_page_regions": {
+    "table_page": 1
+  },
+  "last_updated": "2026-03-31 21:00:06.392222+00:00"
+}

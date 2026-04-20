@@ -1,0 +1,15 @@
+import React, { useState } from "react";
+import { apiFetch, parseApiError } from "utils/api";
+const API_BASE = "/trading-partners";
+export default function PartnerMasterSection({ clientId, verticalId, onSaved, onBanner }: { clientId: string; verticalId?: string; onSaved: () => void; onBanner: (text: string) => void; }) {
+  const [form, setForm] = useState({ partner_code: "", partner_name: "", partner_type: "CUSTOMER", status: "ACTIVE", notes: "" });
+  async function save() { try { const res = await apiFetch(`${API_BASE}`, { method: "POST", body: JSON.stringify({ client_id: clientId, vertical_id: verticalId || null, ...form }) }); if (!res.ok) throw new Error(await parseApiError(res)); onBanner("Trading partner created successfully."); setForm({ partner_code: "", partner_name: "", partner_type: "CUSTOMER", status: "ACTIVE", notes: "" }); onSaved(); } catch (err: any) { onBanner(err?.message || "Unable to save trading partner."); } }
+  return <div style={card}><div style={title}>Trading Partner Master</div><div style={grid}>{field("Partner Code", <input value={form.partner_code} onChange={(e) => setForm({ ...form, partner_code: e.target.value })} style={input} />)}{field("Partner Name", <input value={form.partner_name} onChange={(e) => setForm({ ...form, partner_name: e.target.value })} style={input} />)}{field("Partner Type", <select value={form.partner_type} onChange={(e) => setForm({ ...form, partner_type: e.target.value })} style={input}><option value="CUSTOMER">CUSTOMER</option><option value="SUPPLIER">SUPPLIER</option></select>)}{field("Status", <select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })} style={input}><option value="ACTIVE">ACTIVE</option><option value="INACTIVE">INACTIVE</option></select>)}</div><div style={{ marginTop: 14 }}>{field("Notes", <input value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} style={input} />)}</div><div style={{ display: "flex", gap: 10, marginTop: 14 }}><button type="button" style={primaryButton} onClick={save}>Save Partner</button></div></div>;
+}
+function field(label: string, child: React.ReactNode) { return <div><div style={labelStyle}>{label}</div>{child}</div>; }
+const card: React.CSSProperties = { border: "1px solid #eef2f7", borderRadius: 12, background: "#fff", padding: 16 };
+const title: React.CSSProperties = { fontSize: 15, fontWeight: 800, color: "#0f172a", marginBottom: 14 };
+const grid: React.CSSProperties = { display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 14 };
+const labelStyle: React.CSSProperties = { fontSize: 12, fontWeight: 700, color: "#475569", marginBottom: 6 };
+const input: React.CSSProperties = { width: "100%", minHeight: 38, padding: "8px 10px", borderRadius: 8, border: "1px solid #dbe4ee", background: "#fff", fontSize: 13, color: "#0f172a", outline: "none", boxSizing: "border-box" };
+const primaryButton: React.CSSProperties = { border: "1px solid #0b5fff", background: "#0b5fff", color: "#fff", borderRadius: 8, padding: "9px 14px", fontSize: 13, fontWeight: 700, cursor: "pointer" };
