@@ -7,6 +7,8 @@ from sqlalchemy.orm import Session
 from backend.core.deps import get_db, get_current_user_context, UserContext
 from backend.db import schemas
 from backend.services.purchase_order_service import purchase_order_service
+from backend.services.canonical_document_service import canonical_json_bytes
+import json
 
 router = APIRouter(prefix="/purchase-orders", tags=["Purchase Orders"])
 
@@ -170,11 +172,24 @@ def download_canonical(
     db: Session = Depends(get_db),
 ):
     po = purchase_order_service.get_purchase_order(db, po_id)
-
-    if not po.canonical_json:
+    try:
+        canonical = purchase_order_service._generate_canonical_for_po(db, po)
+    except Exception:
+        canonical = (
+            getattr(po, "canonical_json", None)
+            if hasattr(po, "canonical_json")
+            else None
+        )
+    if not canonical:
         raise HTTPException(status_code=404, detail="Canonical not found")
 
-    return po.canonical_json
+    return Response(
+        content=canonical_json_bytes(canonical),
+        media_type="application/json",
+        headers={
+            "Content-Disposition": f"attachment; filename={po.po_number or po.po_id}_canonical.json"
+        },
+    )
 
 
 # ============================================================
@@ -186,17 +201,48 @@ def download_target(
     db: Session = Depends(get_db),
 ):
     po = purchase_order_service.get_purchase_order(db, po_id)
+    xml_payload = None
+    target_payload_json = None
 
-    if getattr(po, "xml_payload", None):
+    try:
+        _, built, _ = purchase_order_service._generate_target_for_po(db, po)
+        if built:
+            if built.get("content_type") == "application/xml":
+                xml_payload = built.get("payload")
+            elif built.get("content_type") == "application/json":
+                target_payload_json = built.get("payload")
+    except Exception:
+        xml_payload = getattr(po, "xml_payload", None)
+        target_payload_json = (
+            getattr(po, "target_payload_json", None)
+            if hasattr(po, "target_payload_json")
+            else None
+        )
+
+    if not xml_payload and not target_payload_json:
+        xml_payload = getattr(po, "xml_payload", None)
+        target_payload_json = (
+            getattr(po, "target_payload_json", None)
+            if hasattr(po, "target_payload_json")
+            else None
+        )
+
+    if xml_payload:
         return Response(
-            content=po.xml_payload,
+            content=xml_payload,
             media_type="application/xml",
             headers={
                 "Content-Disposition": f"attachment; filename={po.po_number or po.po_id}.xml"
             },
         )
 
-    if getattr(po, "target_payload_json", None):
-        return po.target_payload_json
+    if target_payload_json:
+        return Response(
+            content=json.dumps(target_payload_json, indent=2, ensure_ascii=False, default=str),
+            media_type="application/json",
+            headers={
+                "Content-Disposition": f"attachment; filename={po.po_number or po.po_id}.json"
+            },
+        )
 
     raise HTTPException(status_code=404, detail="No target payload found")

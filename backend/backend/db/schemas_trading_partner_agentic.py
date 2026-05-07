@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Any
 from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -70,6 +70,7 @@ class AgenticProjectCreate(BaseModel):
     message_version: Optional[str] = None
     direction: str = "INBOUND"
     target_message_family: Optional[str] = None
+    invoice_profile_type: Optional[str] = None
     extraction_mode: Optional[str] = "HYBRID_AI_OCR"
     sample_reference: Optional[str] = None
 
@@ -83,12 +84,46 @@ class AgenticProjectRead(BaseModel):
     message_version: Optional[str] = None
     direction: str
     target_message_family: Optional[str] = None
+    invoice_profile_type: Optional[str] = None
     extraction_mode: Optional[str] = None
     sample_reference: Optional[str] = None
     status: str
+    current_stage: str
+    objective: Optional[str] = None
+    approval_status: str
+    conversation_summary: Optional[str] = None
+    recommended_actions: list[str] = Field(default_factory=list)
+    requirements_json: dict[str, Any] = Field(default_factory=dict)
+    test_plan_json: dict[str, Any] = Field(default_factory=dict)
+    test_results_json: dict[str, Any] = Field(default_factory=dict)
+    progress_steps: list[dict[str, str]] = Field(default_factory=list)
+    discovery_json: dict[str, Any] = Field(default_factory=dict)
+    extraction_profile_json: dict[str, Any] = Field(default_factory=dict)
+    address_match_profile_json: dict[str, Any] = Field(default_factory=dict)
+    mapping_profile_json: dict[str, Any] = Field(default_factory=dict)
+    rule_profile_json: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
     updated_at: datetime
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+class AgenticProjectUpdate(BaseModel):
+    objective: Optional[str] = None
+    conversation_summary: Optional[str] = None
+    approval_status: Optional[str] = None
+    recommended_actions: Optional[list[str]] = None
+    requirements_json: Optional[dict[str, Any]] = None
+    test_plan_json: Optional[dict[str, Any]] = None
+    test_results_json: Optional[dict[str, Any]] = None
+    extraction_profile_json: Optional[dict[str, Any]] = None
+    address_match_profile_json: Optional[dict[str, Any]] = None
+    mapping_profile_json: Optional[dict[str, Any]] = None
+    rule_profile_json: Optional[dict[str, Any]] = None
+
+class AgenticProjectAdvance(BaseModel):
+    target_stage: Optional[str] = None
+    summary_note: Optional[str] = None
+    recommended_actions: Optional[list[str]] = None
+    approval_status: Optional[str] = None
 
 class AgenticDiscoveryRequest(BaseModel):
     client_id: str
@@ -99,6 +134,7 @@ class AgenticDiscoveryRequest(BaseModel):
     message_version: Optional[str] = None
     direction: str = "INBOUND"
     target_message_family: Optional[str] = None
+    invoice_profile_type: Optional[str] = None
     extraction_mode: Optional[str] = "HYBRID_AI_OCR"
     sample_reference: Optional[str] = None
 

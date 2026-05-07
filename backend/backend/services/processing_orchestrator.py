@@ -16,6 +16,10 @@ def process_document(
     source_format="UNKNOWN",
     document_type="PO",
 ):
+    learning_party = vendor_learning_service.build_learning_party_key(
+        supplier_name,
+        header_dict.get("supplier_name") or header_dict.get("supplier") or header_dict.get("vendor"),
+    )
     # -----------------------------
     # 1. LOAD VENDOR PROFILE
     # For inbound PO learning, supplier_name here is actually
@@ -25,7 +29,7 @@ def process_document(
         vendor_learning_service.get_best_learning_for_vendor(
             db,
             client_id=client_id,
-            supplier_name=supplier_name,
+            supplier_name=learning_party,
             header=header_dict,
             items=items,
             raw_text=raw_text,
@@ -40,7 +44,7 @@ def process_document(
     # -----------------------------
     confidence = vendor_confidence_service.evaluate(
         vendor_learning=vendor_profile,
-        supplier_name=supplier_name,
+        supplier_name=learning_party,
         document_type=document_type,
         source_format=source_format,
         header_dict=header_dict,

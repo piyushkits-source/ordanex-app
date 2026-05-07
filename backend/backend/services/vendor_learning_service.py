@@ -4,6 +4,7 @@ import hashlib
 import json
 from datetime import datetime
 from typing import Any
+from uuid import UUID
 
 from sqlalchemy.orm import Session
 
@@ -24,6 +25,13 @@ class VendorLearningService:
     def _norm_vendor(self, value: Any) -> str:
         return self._norm_str(value)
 
+    def build_learning_party_key(self, customer_name: Any, supplier_name: Any) -> str:
+        customer = self._norm_vendor(customer_name)
+        supplier = self._norm_vendor(supplier_name)
+        if customer and supplier:
+            return f"{customer}::{supplier}"
+        return customer or supplier
+
     def _norm_doc_type(self, value: Any) -> str:
         v = self._norm_str(value).upper()
         return v or "PO"
@@ -31,6 +39,44 @@ class VendorLearningService:
     def _norm_source_format(self, value: Any) -> str:
         v = self._norm_str(value).upper()
         return v or "UNKNOWN"
+
+    def _as_uuid_or_none(self, value: Any):
+        text = self._norm_str(value)
+        if not text:
+            return None
+        try:
+            return UUID(text)
+        except Exception:
+            return None
+
+    def build_onboarding_validation_requirements_from_purchase_order(self, po) -> dict[str, Any]:
+        return self._build_default_validation_requirements_from_po(po)
+
+    def _build_default_validation_requirements_from_po(self, po) -> dict[str, Any]:
+        field_requirements: dict[str, Any] = {}
+
+        header_values = {
+            "document_number": getattr(po, "po_number", None) or getattr(po, "original_po_number", None),
+            "document_date": getattr(po, "po_date", None),
+            "customer_name": getattr(po, "sender", None),
+            "supplier_name": getattr(po, "receiver", None) or getattr(po, "supplier_name", None),
+            "currency_code": getattr(po, "currency", None),
+            "ship_to_code": getattr(po, "ship_to", None),
+        }
+
+        for field, value in header_values.items():
+            if field in {"document_number", "customer_name", "supplier_name"} or self._norm_str(value):
+                field_requirements[field] = "MANDATORY"
+
+        items = list(getattr(po, "items", []) or [])
+        if items:
+            field_requirements["items.*.material_code"] = "MANDATORY"
+            field_requirements["items.*.quantity"] = "MANDATORY"
+            field_requirements["items.*.customer_uom"] = "MANDATORY"
+            if any(self._norm_str(getattr(item, "delivery_date", None)) for item in items):
+                field_requirements["items.*.delivery_date"] = "MANDATORY"
+
+        return {"field_requirements": field_requirements}
 
     # -----------------------------------
     # FINGERPRINT BUILDERS
@@ -100,7 +146,7 @@ class VendorLearningService:
         best_match_type = "TEXTUAL_ONLY"
 
         for profile in rows:
-            stored_fp = profile.fingerprint_json or {}
+            stored_fp = profile.layout_fingerprint_json or {}
 
             stored_doc_type = self._norm_doc_type(stored_fp.get("document_type"))
             stored_src_fmt = self._norm_source_format(stored_fp.get("source_format"))
@@ -201,41 +247,34 @@ class VendorLearningService:
                 if isinstance(learned_mapping_json, dict)
                 else {"mappings": learned_mapping_json}
             )
-            existing.fingerprint_json = fingerprint_json
-            existing.confidence = confidence
-            existing.approved_count = int(existing.approved_count or 0) + 1
+            existing.layout_fingerprint_json = fingerprint_json
             existing.updated_at = datetime.utcnow()
             existing.last_used_at = datetime.utcnow()
+            existing.is_active = True
             if approved_by:
-                existing.approved_by = approved_by
+                existing.approved_by = self._as_uuid_or_none(approved_by)
+                existing.approved_at = datetime.utcnow()
             db.add(existing)
             return existing
-
-        latest = (
-            db.query(models.VendorLayoutLearning)
-            .filter(models.VendorLayoutLearning.client_id == client_id)
-            .filter(models.VendorLayoutLearning.supplier_name == supplier)
-            .order_by(models.VendorLayoutLearning.version.desc())
-            .first()
-        )
-
-        version = 1 if not latest else int(latest.version or 0) + 1
 
         row = models.VendorLayoutLearning(
             client_id=client_id,
             supplier_name=supplier,
+            mapping_profile_name=f"{supplier or client_id}_{doc_type}_{src_fmt}",
             fingerprint_hash=layout_fingerprint,
-            fingerprint_json=fingerprint_json,
+            layout_fingerprint_json=fingerprint_json,
             learned_mapping_json=(
                 learned_mapping_json
                 if isinstance(learned_mapping_json, dict)
                 else {"mappings": learned_mapping_json}
             ),
-            version=version,
-            confidence=confidence,
-            approved_count=1,
             usage_count=0,
-            approved_by=approved_by,
+            is_active=True,
+            created_by=self._norm_str(approved_by) or None,
+            approved_by=self._as_uuid_or_none(approved_by),
+            approved_at=datetime.utcnow() if approved_by else None,
+            message_type=doc_type,
+            template_version=1,
             created_at=datetime.utcnow(),
             updated_at=datetime.utcnow(),
             last_used_at=datetime.utcnow(),
@@ -264,15 +303,20 @@ class VendorLearningService:
                 return None
 
         mappings_json = getattr(po, "mappings_json", None) or []
-        if not mappings_json:
-            return None
+        validation_json = self._build_default_validation_requirements_from_po(po)
 
-        # For inbound PO learning, sender/customer owns the layout
-        learning_party = self._norm_vendor(getattr(po, "sender", None))
+        learning_party = self.build_learning_party_key(
+            getattr(po, "sender", None),
+            getattr(po, "receiver", None),
+        )
         if not learning_party:
             return None
 
-        learned_mapping_json = {"mappings": mappings_json}
+        learned_mapping_json = {
+            "mappings": mappings_json,
+            "validation": validation_json,
+            "learned_required_fields": list((validation_json or {}).get("field_requirements") or []),
+        }
 
         layout_fingerprint = self._build_layout_fingerprint_from_mappings(mappings_json)
 
@@ -413,7 +457,10 @@ class VendorLearningService:
         if not filtered_mappings:
             return None
 
-        learning_party = self._norm_vendor(getattr(po, "sender", None))
+        learning_party = self.build_learning_party_key(
+            getattr(po, "sender", None),
+            getattr(po, "receiver", None),
+        )
         if not learning_party:
             return None
 

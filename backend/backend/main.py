@@ -39,11 +39,14 @@ from backend.api.parser_profiles_api import router as parser_profiles_router
 from backend.api.replay_api import router as replay_router
 from backend.api.monitoring_dashboard_api import router as monitoring_dashboard_router
 from backend.api.polling_admin_api import router as polling_admin_router
-
+from backend.api.support_api import router as support_router
+from backend.api.trading_partner_agentic_api import router as trading_partner_agentic_router
+from backend.api.system_api import router as system_router
 
 from fastapi.middleware.cors import CORSMiddleware
 from backend.db.database import engine
 from backend.db import models_partner_universal_patch
+from backend.bootstrap import ensure_runtime_schema_extensions
 
 
 # from backend.services.parser_registry import parser_registry
@@ -68,6 +71,7 @@ app.add_middleware(
 
 
 Base.metadata.create_all(bind=engine)
+ensure_runtime_schema_extensions()
 
 # Existing routers
 app.include_router(auth_router)
@@ -106,6 +110,9 @@ app.include_router(parser_profiles_router)
 app.include_router(replay_router)
 app.include_router(monitoring_dashboard_router)
 app.include_router(polling_admin_router)
+app.include_router(support_router)
+app.include_router(trading_partner_agentic_router)
+app.include_router(system_router)
 
 
 # New SaaS/core routing layer

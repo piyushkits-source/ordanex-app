@@ -1,5 +1,9 @@
+import { useEffect, useState } from "react";
 import { useLocation } from "react-router-dom";
 import UserMenu from "../../components/common/UserMenu";
+import { getFrontendEnvironmentLabel, workspaceEnvironmentBadge } from "../../utils/environment";
+import { apiFetch } from "../../utils/api";
+import { useAppScope } from "../../context/AppScopeContext";
 
 function getPageTitle(pathname: string) {
   if (pathname.startsWith("/client-config"))     return "Client Configuration";
@@ -17,6 +21,31 @@ function getPageTitle(pathname: string) {
 export default function TopBar() {
   const location = useLocation();
   const title = getPageTitle(location.pathname);
+  const { scope } = useAppScope();
+  const [environment, setEnvironment] = useState(getFrontendEnvironmentLabel());
+
+  useEffect(() => {
+    if (scope.environment) {
+      setEnvironment(workspaceEnvironmentBadge(scope.environment));
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await apiFetch("/system/environment", { method: "GET" });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!cancelled && data?.environment) {
+          setEnvironment(String(data.environment).toUpperCase());
+        }
+      } catch {
+        // keep frontend label fallback
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [scope.environment]);
 
   return (
     <div style={topBar}>
@@ -32,7 +61,18 @@ export default function TopBar() {
 
         <div>
           <div style={brand}>Ordanex</div>
-          <div style={subtitle}>{title}</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 2 }}>
+            <div style={subtitle}>{title}</div>
+            <div
+              style={{
+                ...envBadge,
+                background: environment === "PRODUCTION" ? "rgba(239,68,68,0.18)" : "rgba(16,185,129,0.18)",
+                borderColor: environment === "PRODUCTION" ? "rgba(254,202,202,0.55)" : "rgba(167,243,208,0.55)",
+              }}
+            >
+              {environment}
+            </div>
+          </div>
         </div>
       </div>
 
@@ -76,4 +116,17 @@ const brand: React.CSSProperties = {
 const subtitle: React.CSSProperties = {
   fontSize: 12,
   opacity: 0.85,
+};
+
+const envBadge: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  border: "1px solid rgba(255,255,255,0.45)",
+  color: "#fff",
+  borderRadius: 999,
+  padding: "3px 10px",
+  fontSize: 10,
+  fontWeight: 800,
+  letterSpacing: 0.8,
 };

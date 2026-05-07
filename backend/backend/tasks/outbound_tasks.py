@@ -1,6 +1,8 @@
 
 from __future__ import annotations
 
+import json
+
 from backend.celery_app import celery_app
 from backend.db.database import SessionLocal
 from backend.db import models
@@ -21,6 +23,22 @@ def _connection_from_client_config(db, client_id: str) -> dict:
     return dict(row.config_value_json or {}) if row else {}
 
 
+def _resolve_payload(po) -> tuple[str, str, str]:
+    xml_payload = getattr(po, "xml_payload", None)
+    json_payload = getattr(po, "target_payload_json", None)
+    raw_text = getattr(po, "raw_text", None) or ""
+
+    if xml_payload:
+        return xml_payload, "application/xml", "xml"
+    if json_payload:
+        if isinstance(json_payload, str):
+            payload_text = json_payload
+        else:
+            payload_text = json.dumps(json_payload, ensure_ascii=False)
+        return payload_text, "application/json", "json"
+    return raw_text, "text/plain", "txt"
+
+
 @celery_app.task(name="backend.tasks.outbound.deliver_po")
 def deliver_po(po_id: str) -> dict:
     db = SessionLocal()
@@ -35,13 +53,14 @@ def deliver_po(po_id: str) -> dict:
             return {"success": False, "message": "No active outbound connection configured"}
 
         connector = get_connector(connection_type)
-        payload = getattr(po, "xml_payload", None) or getattr(po, "raw_text", None) or ""
+        payload, content_type, file_extension = _resolve_payload(po)
+        filename = f"{po.po_number or po.po_id}.{file_extension}"
         result = connector.send(
             payload=payload,
-            content_type="application/xml" if getattr(po, "xml_payload", None) else "text/plain",
-            file_extension="xml" if getattr(po, "xml_payload", None) else "txt",
+            content_type=content_type,
+            file_extension=file_extension,
             connection=connection,
-            filename=f"{po.po_number or po.po_id}.xml" if getattr(po, "xml_payload", None) else f"{po.po_number or po.po_id}.txt",
+            filename=filename,
         )
 
         if hasattr(po, "delivery_status"):

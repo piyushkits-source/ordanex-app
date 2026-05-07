@@ -13,6 +13,7 @@ class MonitoringQueueItem(BaseModel):
     client_id: str
 
     po_number: str | None = None
+    document_number: str | None = None
     docnum: str | None = None
     supplier_name: str | None = None
     status: str | None = None
@@ -21,13 +22,36 @@ class MonitoringQueueItem(BaseModel):
     direction: str | None = None
     environment: str | None = None
     source_type: str | None = None
+    message_type: str | None = None
+    message_family: str | None = None
+    po_type: str | None = None
+    order_type: str | None = None
+    transaction_id: str | None = None
+    po_confidence: str | None = None
+
+    invoice_number: str | None = None
+    invoice_date: str | None = None
+    invoice_total: str | float | None = None
+    billing_document_number: str | None = None
+    reference_po_number: str | None = None
+    due_date: str | None = None
+    payment_terms: str | None = None
+    tax_total: str | float | None = None
+    freight_total: str | float | None = None
+    receipt_number: str | None = None
+    receipt_total: str | float | None = None
 
     created_at: datetime | None = None
     received_at: datetime | None = None
+    processed_at: datetime | None = None
+    delivered_at: datetime | None = None
 
     file_url: str | None = None
     mime_type: str | None = None
     file_name: str | None = None
+    target_adapter_name: str | None = None
+    target_content_type: str | None = None
+    delivery_status: str | None = None
 
     raw_text: str | None = None
     xml_payload: str | None = None

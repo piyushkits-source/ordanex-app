@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import React from "react";
 import {
   FaFileCsv,
@@ -11,6 +11,7 @@ import {
 import ExpandedMessageRow from "components/monitor/ExpandedMessageRow";
 import "./message-monitor-premium.css";
 import { getAuthHeaders } from "utils/auth";
+import { useAppScope } from "context/AppScopeContext";
 
 type MonitorRow = {
   po_id: string;
@@ -68,10 +69,11 @@ type ProcessingStep = {
 const API_BASE = "";
 
 export default function MessageMonitorPage() {
+  const { scope, setEnvironmentScope } = useAppScope();
   const [rows, setRows] = useState<MonitorRow[]>([]);
   const [loading, setLoading] = useState(false);
 
-  const [environment, setEnvironment] = useState("PROD");
+  const [environment, setEnvironment] = useState(scope.environment || "PROD");
   const [direction, setDirection] = useState("ALL");
   const [statusFilter, setStatusFilter] = useState("ALL");
   const [search, setSearch] = useState("");
@@ -88,8 +90,72 @@ export default function MessageMonitorPage() {
   const [processingFlowByPo, setProcessingFlowByPo] = useState<
     Record<string, ProcessingStep[]>
   >({});
+  const isRefreshingRef = useRef(false);
+  function resolveMessageType(row: any): string {
+    return (
+      row?.messageType ||
+      row?.message_type ||
+      row?.message_family ||
+      row?.document_type ||
+      row?.po_type ||
+      row?.order_type ||
+      "UNKNOWN"
+    );
+  }
 
-  async function loadQueue() {
+  function normalizeMonitorRow(row: any): MonitorRow {
+    if (!row) return row;
+
+    return {
+      ...row,
+      id: row.id || row.po_id || "",
+      documentId: row.documentId || row.po_id || "",
+      messageType: resolveMessageType(row),
+      message_type: row.message_type || row.messageType || resolveMessageType(row),
+      message_family: row.message_family || row.document_type || row.po_type || row.order_type || resolveMessageType(row),
+      document_type: row.document_type || row.po_type || row.message_family || resolveMessageType(row),
+      transactionNumber:
+        row.transactionNumber ||
+        row.transaction_id ||
+        row.invoice_number ||
+        row.billing_document_number ||
+        row.reference_po_number ||
+        row.docnum ||
+        row.po_number ||
+        "",
+      direction: row.direction || row.message_direction || row.flow_direction || undefined,
+      environment: row.environment || "PROD",
+      receivedAt: row.receivedAt || row.received_at || row.created_at || "",
+      fileUrl: row.fileUrl || row.file_url || undefined,
+      fileName: row.fileName || row.file_name || undefined,
+      mimeType: row.mimeType || row.mime_type || undefined,
+      rawText: row.rawText || row.raw_text || undefined,
+      transformedXml: row.transformedXml || row.xml_payload || undefined,
+      fields: row.fields || row.mappings || [],
+      lineItems: row.lineItems || row.items || [],
+      invoice_number: row.invoice_number || null,
+      invoice_date: row.invoice_date || null,
+      billing_document_number: row.billing_document_number || null,
+      reference_po_number: row.reference_po_number || null,
+      invoice_total: row.invoice_total || null,
+    } as MonitorRow;
+  }
+
+
+  const sortedRows = useMemo(() => {
+    return [...rows].sort((a, b) => {
+      const aTime = a.created_at ? new Date(a.created_at).getTime() : 0;
+      const bTime = b.created_at ? new Date(b.created_at).getTime() : 0;
+      return bTime - aTime;
+    });
+  }, [rows]);
+
+  const loadQueue = useCallback(async () => {
+    if (isRefreshingRef.current) {
+      return;
+    }
+
+    isRefreshingRef.current = true;
     setLoading(true);
     try {
       const params = new URLSearchParams({
@@ -101,38 +167,78 @@ export default function MessageMonitorPage() {
         toDate,
       });
       console.log("statusFilter sent =", statusFilter);
-      const res = await fetch(`${API_BASE}/monitoring/queue?${params.toString()}`, { headers: getAuthHeaders() });
+      const res = await fetch(`${API_BASE}/monitoring/queue?${params.toString()}`, {
+        headers: getAuthHeaders(),
+        cache: "no-store",
+      });
       const data = await res.json();
       console.log("first queue row after refresh =", Array.isArray(data) ? data[0] : data);
-      setRows(Array.isArray(data) ? data : data.items || []);
+      const nextRows = Array.isArray(data) ? data : data.items || [];
+      setRows(nextRows.map(normalizeMonitorRow));
     } catch (err) {
       console.error("Queue load failed", err);
       setRows([]);
     } finally {
+      isRefreshingRef.current = false;
       setLoading(false);
     }
-  }
+  }, [direction, environment, fromDate, search, statusFilter, toDate]);
+
+  useEffect(() => {
+    setEnvironment(scope.environment || "PROD");
+  }, [scope.environment]);
 
   useEffect(() => {
     loadQueue();
-  }, [environment, direction, statusFilter, fromDate, toDate]);
+  }, [loadQueue]);
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      loadQueue();
+    }, 15000);
+
+    return () => window.clearInterval(intervalId);
+  }, [loadQueue]);
+
+  useEffect(() => {
+    function handleVisibilityOrFocus() {
+      if (document.visibilityState === "visible") {
+        loadQueue();
+      }
+    }
+
+    window.addEventListener("focus", handleVisibilityOrFocus);
+    document.addEventListener("visibilitychange", handleVisibilityOrFocus);
+
+    return () => {
+      window.removeEventListener("focus", handleVisibilityOrFocus);
+      document.removeEventListener("visibilitychange", handleVisibilityOrFocus);
+    };
+  }, [loadQueue]);
 
   const counts: Counts = useMemo(() => {
-    const total = rows.length;
-    const processed = rows.filter((r) =>
+    const total = sortedRows.length;
+    const processed = sortedRows.filter((r) =>
       ["PROCESSED", "SUCCESS"].includes((r.status || "").toUpperCase())
     ).length;
-    const pending = rows.filter((r) =>
+    const pending = sortedRows.filter((r) =>
       ["NEW", "PENDING", "ERROR", "FAILED", "CORRECTED"].includes(
         (r.status || "").toUpperCase()
       )
     ).length;
-    const errors = rows.filter((r) =>
+    const errors = sortedRows.filter((r) =>
       ["ERROR", "FAILED"].includes((r.status || "").toUpperCase())
     ).length;
 
     return { total, processed, pending, errors };
-  }, [rows]);
+  }, [sortedRows]);
+
+  function formatDateTime(value?: string | null) {
+    if (!value) return "-";
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return value;
+    return parsed.toLocaleString();
+  }
 
   async function loadActivityLogs(poId: string) {
     try {
@@ -202,13 +308,13 @@ export default function MessageMonitorPage() {
       "Created At",
     ];
 
-    const lines = rows.map((r) => [
+    const lines = sortedRows.map((r) => [
       r.status || "",
       r.po_id || "",
-      "Orders",
+      resolveMessageType(r),
       r.sender || "",
       r.receiver || "",
-      r.document_number || r.transaction_id || r.po_number || r.docnum || "",
+      r.docnum || r.document_number || r.po_number || "",
       r.created_at || "",
     ]);
 
@@ -234,17 +340,17 @@ export default function MessageMonitorPage() {
       "Created At",
     ];
 
-    const rowsText = rows
+    const rowsText = sortedRows
       .map(
         (r) => `
         <tr>
           <td>${escapeHtml(r.status || "")}</td>
           <td>${escapeHtml(r.po_id || "")}</td>
-          <td>Orders</td>
+          <td>{escapeHtml(resolveMessageType(r))}</td>
           <td>${escapeHtml(r.sender || "")}</td>
           <td>${escapeHtml(r.receiver || "")}</td>
           <td>${escapeHtml(
-            r.document_number || r.transaction_id || r.po_number || r.docnum || ""
+            r.docnum || r.document_number || r.po_number || ""
           )}</td>
           <td>${escapeHtml(r.created_at || "")}</td>
         </tr>`
@@ -324,7 +430,10 @@ export default function MessageMonitorPage() {
           <select
             className="filter-select"
             value={environment}
-            onChange={(e) => setEnvironment(e.target.value)}
+            onChange={(e) => {
+              setEnvironment(e.target.value);
+              setEnvironmentScope(e.target.value);
+            }}
           >
             <option value="PROD">Production</option>
             <option value="STAGING">Staging</option>
@@ -379,6 +488,7 @@ export default function MessageMonitorPage() {
                 <th>Message Type</th>
                 <th>Sender</th>
                 <th>Receiver</th>
+                <th>Created At</th>
                 <th>Confidence</th>
                 <th>Source</th>
                 <th>Transaction ID</th>
@@ -386,7 +496,7 @@ export default function MessageMonitorPage() {
             </thead>
 
             <tbody>
-              {rows.map((row) => {
+              {sortedRows.map((row) => {
                 const isExpanded = expandedRowId === row.po_id;
 
                 return (
@@ -406,17 +516,19 @@ export default function MessageMonitorPage() {
                     >
                       <td>{row.status || "-"}</td>
                       <td>{(row as any).docnum || row.po_id || "-"}</td>
-                      <td>{(row as any).message_type || row.po_type || "Orders"}</td>
+                      <td>{resolveMessageType(row as any)}</td>
                       <td>{(row as any).sender || "-"}</td>
                       <td>{(row as any).receiver || (row as any).supplier_name || "-"}</td>
-                      <td>{(row as any).po_confidence || "N/A"}</td>
+                      <td>{formatDateTime((row as any).created_at)}</td>
+                      <td>{(row as any).po_confidence || ((row.items || []).length ? "MEDIUM" : "LOW")}</td>
                       <td>{(row as any).source_type || "-"}</td>
                       <td>{(row as any).transaction_id || row.po_number || "-"}</td>
                     </tr>
 
                     {isExpanded && (
                       <tr key={`expanded-${row.po_id}`}>
-                        <td colSpan={8} style={{ padding: 0 }}>
+                        <td colSpan={9} style={{ padding: 0 }}>
+                          <ExpandedRowErrorBoundary rowId={row.po_id}>
                           <ExpandedMessageRow
                             key={`expanded-row-${row.po_id}-${(row as any).created_at || ""}-${(row as any).status || ""}`}
                             row={row}
@@ -426,6 +538,7 @@ export default function MessageMonitorPage() {
                             processingFlow={processingFlowByPo[row.po_id] || []}
                             onRefresh={loadQueue}
                           />
+                      </ExpandedRowErrorBoundary>
                         </td>
                       </tr>
                     )}
@@ -475,4 +588,44 @@ function escapeHtml(value: string) {
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;");
+}
+
+class ExpandedRowErrorBoundary extends React.Component<
+  { rowId: string; children: React.ReactNode },
+  { hasError: boolean; message: string }
+> {
+  constructor(props: { rowId: string; children: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false, message: "" };
+  }
+
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, message: error?.message || "Unknown viewer error" };
+  }
+
+  componentDidCatch(error: Error) {
+    console.error(`Expanded row render failed for ${this.props.rowId}:`, error);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div
+          style={{
+            padding: 16,
+            margin: 0,
+            background: "#fff7ed",
+            borderTop: "1px solid #fed7aa",
+            borderBottom: "1px solid #fed7aa",
+            color: "#9a3412",
+            fontSize: 13,
+          }}
+        >
+          This message could not be rendered safely. {this.state.message}
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
 }

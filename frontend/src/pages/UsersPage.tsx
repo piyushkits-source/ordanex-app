@@ -61,6 +61,13 @@ export default function UsersPage() {
     }
   }
 
+  function formatLastLogin(value?: string | null) {
+    if (!value) return "-";
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return value;
+    return parsed.toLocaleString();
+  }
+
   return (
     <div>
       <PageHeader title="User Management" subtitle="Create users, assign client scope and role, and activate or deactivate access." />
@@ -73,7 +80,7 @@ export default function UsersPage() {
             {field("Client ID", <input value={form.client_id} onChange={(e) => setForm({ ...form, client_id: e.target.value })} style={input} />)}
             {field("Email", <input value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} style={input} />)}
             {field("Password", <input type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} style={input} />)}
-            {field("Role", <select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })} style={input}><option value="super_admin">super_admin</option><option value="client_admin">client_admin</option><option value="business_user">business_user</option></select>)}
+            {field("Role", <select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })} style={input}><option value="super_admin">super_admin</option><option value="client_admin">client_admin</option><option value="it_admin">it_admin</option><option value="business_user">business_user</option></select>)}
           </div>
           <div style={{ marginTop: 14 }}><button type="button" style={primaryButton} onClick={createUser}>Create User</button></div>
         </div>
@@ -99,7 +106,7 @@ export default function UsersPage() {
                     <td style={td}>{row.client_id || "-"}</td>
                     <td style={td}>{row.role}</td>
                     <td style={td}>{row.is_active ? "ACTIVE" : "INACTIVE"}</td>
-                    <td style={td}>{row.last_login_at || "-"}</td>
+                    <td style={td}>{formatLastLogin(row.last_login_at)}</td>
                     <td style={td}><button type="button" style={actionButton} onClick={() => toggleActive(row.email, row.is_active)}>{row.is_active ? "Deactivate" : "Activate"}</button></td>
                   </tr>
                 ))}

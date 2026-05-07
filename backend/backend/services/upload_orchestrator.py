@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import datetime, date
 from sqlalchemy.orm import Session, joinedload
 
@@ -12,6 +13,8 @@ from backend.services.config_loader import (
 from backend.services.item_mapping_service import build_runtime_config_from_db
 from backend.services.processing_orchestrator import process_document
 from backend.services.auto_detection_service import auto_detection_service
+from backend.services.po_requirement_service import evaluate_required_processing_fields
+from backend.services.idoc_number_service import generate_enterprise_docnum
 
 try:
     from backend.services.rules_engine import apply_business_rules, apply_uom_rules
@@ -31,7 +34,12 @@ def _safe_float(val, default=0.0):
     try:
         if val in [None, ""]:
             return default
-        return float(val)
+        sval = str(val).strip().replace(" ", "")
+        if "," in sval and "." not in sval:
+            sval = sval.replace(",", ".")
+        elif "," in sval and "." in sval:
+            sval = sval.replace(",", "")
+        return float(sval)
     except Exception:
         return default
 
@@ -48,6 +56,97 @@ def _normalize_date(value):
         except Exception:
             continue
     return None
+
+
+_ISO_CURRENCY_CODES = {"USD", "EUR", "GBP", "JPY", "CNY", "CAD", "AUD", "SGD", "HKD", "TWD", "KRW", "INR", "MXN", "CHF"}
+
+_CURRENCY_TOKEN_MAP = {
+    "$": "USD",
+    "US$": "USD",
+    "USD": "USD",
+    "DOLLAR": "USD",
+    "EUR": "EUR",
+    "EURO": "EUR",
+    "GBP": "GBP",
+    "POUND": "GBP",
+    "JPY": "JPY",
+    "YEN": "JPY",
+    "CNY": "CNY",
+    "RMB": "CNY",
+    "RENMINBI": "CNY",
+    "CAD": "CAD",
+    "C$": "CAD",
+    "AUD": "AUD",
+    "A$": "AUD",
+    "SGD": "SGD",
+    "HKD": "HKD",
+    "NT$": "TWD",
+    "TWD": "TWD",
+    "KRW": "KRW",
+    "INR": "INR",
+    "MXN": "MXN",
+    "CHF": "CHF",
+}
+
+
+def normalize_currency_code(value: str | None) -> str | None:
+    raw = _safe_str(value)
+    if not raw:
+        return None
+
+    compact = raw.strip()
+    upper = compact.upper()
+    if upper in _ISO_CURRENCY_CODES:
+        return upper
+
+    if "人民币" in compact or "圆" in compact:
+        return "CNY"
+    if any(ch in compact for ch in ["€"]):
+        return "EUR"
+    if any(ch in compact for ch in ["£"]):
+        return "GBP"
+    if any(ch in compact for ch in ["₹"]):
+        return "INR"
+    if any(ch in compact for ch in ["₩"]):
+        return "KRW"
+    if "￥" in compact or "¥" in compact or "円" in compact:
+        return "JPY"
+    if "$" == compact:
+        return "USD"
+
+    sanitized = compact.replace("(", " ").replace(")", " ").replace("/", " ").replace("-", " ")
+    for token in sanitized.split():
+        token_upper = token.upper()
+        if token_upper in _CURRENCY_TOKEN_MAP:
+            return _CURRENCY_TOKEN_MAP[token_upper]
+
+    symbol_only = "".join(ch for ch in compact if not ch.isalnum() and not ch.isspace())
+    if symbol_only in _CURRENCY_TOKEN_MAP:
+        return _CURRENCY_TOKEN_MAP[symbol_only]
+
+    return upper if len(upper) == 3 and upper.isalpha() else compact
+
+
+def detect_language_code(raw_text: str | None, sender: str | None = None) -> str:
+    text = raw_text or ""
+    sender_text = (sender or "").lower()
+    lowered = text.lower()
+
+    if re.search(r"[一-鿿]", text):
+        return "ZH"
+    if re.search(r"[぀-ヿ]", text):
+        return "JA"
+    if re.search(r"[가-힯]", text):
+        return "KO"
+
+    if "quebec" in sender_text or any(marker in lowered for marker in ["bonjour", "quantite", "quantit", "livraison", "facture", "numero"]):
+        return "FR"
+    if any(word in lowered for word in ["lieferung", "menge", "rechnung", "bestellung"]):
+        return "DE"
+    if any(word in lowered for word in ["cantidad", "entrega", "direccion", "factura", "pedido"]):
+        return "ES"
+
+    return "EN"
 
 
 def _normalize_source_format(value: str | None) -> str:
@@ -112,6 +211,24 @@ def _detect_document_type(parsed_data: dict, raw_header: dict) -> str:
     if explicit:
         return _safe_str(explicit).upper()
 
+    invoice_like = any(
+        raw_header.get(field) not in [None, ""]
+        for field in (
+            "invoice_number",
+            "invoice_date",
+            "billing_document_number",
+            "invoice_total",
+            "invoice_amount",
+            "reference_po_number",
+        )
+    ) or any(
+        marker in _safe_str(parsed_data.get("raw_text") or raw_header.get("raw_text") or "").lower()
+        for marker in ("invoice", "tax invoice", "commercial invoice", "billing invoice")
+    )
+
+    if invoice_like:
+        return "INVOICE"
+
     return "PO"
 
 
@@ -172,6 +289,9 @@ def process_parsed_po_upload(
     created_by: str = "system",
     environment: str = "PROD",
     file_id: str | None = None,
+    inbound_message_id=None,
+    split_key=None,
+    split_sequence=None,
 ):
     parsed_data = parsed_data or {}
     raw_header = parsed_data.get("header", {}) or {}
@@ -181,24 +301,8 @@ def process_parsed_po_upload(
     source_format = _detect_source_format(parsed_data, raw_text)
     document_type = _detect_document_type(parsed_data, raw_header)
     
-    # STEP 1: detect language
-    detected_language = detect_language_code(
-        raw_text=raw_text,
-        sender=header.get("customer_name") or sender,
-    )
-
-    # STEP 2: attach to header (optional)
-    header["language_code"] = detected_language
-
-    # STEP 3: prepare mapping resolution JSON
+    # STEP 1: prepare mapping resolution JSON
     mapping_resolution_json = parsed_data.get("mapping_resolution_json") or {}
-
-    mapping_resolution_json["language_code"] = {
-        "value": detected_language,
-        "text": detected_language,
-        "source": "AUTO_DETECTED",
-        "confidence": 0.95,
-    }
 
     item_mapping_cfg = get_item_mapping_config(db, client_id)
     business_rules = get_business_rules(db, client_id)
@@ -225,14 +329,20 @@ def process_parsed_po_upload(
     # -----------------------------------
     # GENERIC DOCUMENT HEADER
     # -----------------------------------
+    normalized_currency = normalize_currency_code(raw_header.get("currency") or raw_header.get("currency_code"))
+
+    raw_document_number = raw_header.get("po_number") or raw_header.get("document_number")
+    if str(raw_document_number or "").strip().upper() in {"EXCEL_UPLOAD", "CSV_UPLOAD", "TEXT_UPLOAD"}:
+        raw_document_number = None
+
     header = {
-        "document_number": raw_header.get("po_number") or raw_header.get("document_number"),
+        "document_number": raw_document_number,
         "document_date": _normalize_date(
             raw_header.get("po_date") or raw_header.get("document_date")
         ),
         "customer_name": customer_name,
         "supplier_name": supplier_name,
-        "currency": raw_header.get("currency"),
+        "currency": normalized_currency,
         "document_type": raw_header.get("po_type") or raw_header.get("document_type"),
         "order_type": raw_header.get("order_type"),
         "sold_to": raw_header.get("sold_to"),
@@ -247,10 +357,37 @@ def process_parsed_po_upload(
 
     detected_language = detect_language_code(
         raw_text=raw_text,
-        sender=header.get("customer_name") or sender,
+        sender=header.get("customer_name") or customer_name,
     )
 
     header["language_code"] = detected_language
+    mapping_resolution_json["language_code"] = {
+        "value": detected_language,
+        "text": detected_language,
+        "source": "AUTO_DETECTED",
+        "confidence": 0.95,
+    }
+
+    def _set_mapping_value(key: str, value, source: str = "PARSED"):
+        if value in [None, ""]:
+            return
+        mapping_resolution_json[key] = {
+            "value": str(value),
+            "text": str(value),
+            "source": source,
+            "confidence": 0.9,
+        }
+
+    _set_mapping_value("document_number", header.get("document_number"))
+    _set_mapping_value("po_number", header.get("document_number"))
+    _set_mapping_value("document_date", header.get("document_date"))
+    _set_mapping_value("po_date", header.get("document_date"))
+    _set_mapping_value("customer_name", header.get("customer_name"))
+    _set_mapping_value("supplier_name", header.get("supplier_name"))
+    _set_mapping_value("currency_code", header.get("currency"))
+    _set_mapping_value("document_type", document_type)
+    _set_mapping_value("order_type", header.get("order_type"))
+    _set_mapping_value("ship_to_code", header.get("ship_to"))
 
     # -----------------------------------
     # GENERIC MESSAGE FIELDS
@@ -266,6 +403,10 @@ def process_parsed_po_upload(
     items = []
     for idx, item in enumerate(raw_items, start=1):
         partner_line_no = item.get("line_no") or item.get("line_number") or idx
+        try:
+            partner_line_no = int(float(str(partner_line_no).strip()))
+        except Exception:
+            partner_line_no = idx
 
         price = (
             item.get("unit_price")
@@ -278,7 +419,7 @@ def process_parsed_po_upload(
             "material_code": _safe_str(item.get("material_code") or item.get("material")),
             "description": _safe_str(item.get("description")),
             "quantity": _safe_float(item.get("quantity"), None),
-            "uom": _safe_str(item.get("uom")) or runtime_cfg.get("uom_default", "EA"),
+            "uom": _safe_str(item.get("uom")) or runtime_cfg.get("uom_default"),
             "unit_price": _safe_float(price, None),
             "amount": _safe_float(item.get("amount"), None),
             "delivery_date": _normalize_date(item.get("delivery_date")),
@@ -300,6 +441,18 @@ def process_parsed_po_upload(
                 pass
 
         items.append(normalized_item)
+
+        _set_mapping_value(f"items.{idx - 1}.line_no", normalized_item.get("line_no"))
+        _set_mapping_value(f"items.{idx - 1}.material_code", normalized_item.get("material_code"))
+        _set_mapping_value(f"items.{idx - 1}.mapped_product", normalized_item.get("material_code"))
+        _set_mapping_value(f"items.{idx - 1}.description", normalized_item.get("description"))
+        _set_mapping_value(f"items.{idx - 1}.line_details", normalized_item.get("description"))
+        _set_mapping_value(f"items.{idx - 1}.quantity", normalized_item.get("quantity"))
+        _set_mapping_value(f"items.{idx - 1}.mapped_quantity", normalized_item.get("quantity"))
+        _set_mapping_value(f"items.{idx - 1}.customer_uom", normalized_item.get("uom"))
+        _set_mapping_value(f"items.{idx - 1}.unit_price", normalized_item.get("unit_price"))
+        _set_mapping_value(f"items.{idx - 1}.amount", normalized_item.get("amount"))
+        _set_mapping_value(f"items.{idx - 1}.delivery_date", normalized_item.get("delivery_date"))
 
     # -----------------------------------
     # APPLY RULES
@@ -377,25 +530,72 @@ def process_parsed_po_upload(
     )
 
     # -----------------------------------
+    # REQUIRED FIELD GATE
+    # -----------------------------------
+    requirement_state = evaluate_required_processing_fields(
+        db,
+        client_id=client_id,
+        sender_name=sender,
+        receiver_name=receiver,
+        document_type=document_type,
+        source_format=source_format,
+        mapping_resolution_json=mapping_resolution_json,
+        header={
+            "document_number": header.get("document_number"),
+            "document_date": header.get("document_date"),
+            "customer_name": header.get("customer_name"),
+            "supplier_name": header.get("supplier_name"),
+            "currency_code": header.get("currency"),
+            "ship_to_code": header.get("ship_to"),
+            "document_type": document_type,
+            "order_type": header.get("order_type"),
+        },
+        items=[
+            {
+                "line_no": item.get("line_no"),
+                "material_code": item.get("material_code"),
+                "mapped_product": item.get("material_code"),
+                "description": item.get("description"),
+                "quantity": item.get("quantity"),
+                "mapped_quantity": item.get("quantity"),
+                "customer_uom": item.get("uom"),
+                "uom": item.get("uom"),
+                "delivery_date": item.get("delivery_date"),
+            }
+            for item in items
+        ],
+    )
+    missing_required_fields = list(requirement_state.get("missing_required_fields") or [])
+    auto_process_ready = bool(requirement_state.get("auto_process_ready", len(missing_required_fields) == 0))
+    has_setup = bool(requirement_state.get("has_setup", True))
+
+    # -----------------------------------
     # REASONS
     # -----------------------------------
     all_reasons = (
         (auto_result.get("reasons") or [])
         + (orchestrator_result.get("reasons") or [])
     )
+    if missing_required_fields:
+        all_reasons.append(
+            "Missing required fields for automatic processing: " + ", ".join(missing_required_fields)
+        )
 
     # -----------------------------------
     # CREATE DOCUMENT RECORD
     # -----------------------------------
     document_number = header.get("document_number")
+    sequence_docnum = generate_enterprise_docnum(db, client_id, sender or receiver or "ORD")
 
     po = models.PurchaseOrder(
         client_id=client_id,
         file_id=file_id,
-
+        inbound_message_id=inbound_message_id,
+        split_key=split_key,
+        split_sequence=split_sequence,
         po_number=document_number,
         original_po_number=document_number,
-        docnum=document_number,
+        docnum=sequence_docnum,
 
         po_date=header.get("document_date"),
         supplier_name=header.get("supplier_name") or receiver,
@@ -411,10 +611,15 @@ def process_parsed_po_upload(
         environment=environment,
 
         received_at=now,
-        processed_at=now,
+        processed_at=(now if auto_process_ready else None),
+        needs_review=bool(missing_required_fields) or not has_setup,
+        review_status=("REQUIRED_FIELDS_MISSING" if missing_required_fields else ("NO_PARTNER_SETUP" if not has_setup else "READY_FOR_AUTO_PROCESS")),
 
-        status="NEW",
+        status=("PENDING" if missing_required_fields else "NEW"),
         mappings_json=final_mappings or None,
+        mapping_resolution_json=mapping_resolution_json or None,
+        field_boxes_json=bbox_map or None,
+        vendor_learning_json=requirement_state or None,
         source_type=source_type,
         po_confidence=(
             "HIGH" if confidence_score >= 90
@@ -424,7 +629,7 @@ def process_parsed_po_upload(
         po_validation_reason=(
             "; ".join(all_reasons)[:2000]
             if all_reasons
-            else header.get("validation_reason")
+            else header.get("validation_reason") or requirement_state.get("processing_block_reason")
         ),
 
         total_items=len(items),
@@ -476,3 +681,4 @@ def process_parsed_po_upload(
     )
 
     return po
+

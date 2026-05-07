@@ -13,4 +13,18 @@ export type AgenticOnboardingProject = {
   target_message_family: string;
   extraction_mode: string;
   status: string;
+  current_stage: string;
+  objective?: string | null;
+  approval_status: string;
+  conversation_summary?: string | null;
+  recommended_actions: string[];
+  requirements_json: Record<string, any>;
+  test_plan_json: Record<string, any>;
+  test_results_json: Record<string, any>;
+  progress_steps: Array<{ stage: string; status: string }>;
+  discovery_json: Record<string, any>;
+  extraction_profile_json: Record<string, any>;
+  address_match_profile_json: Record<string, any>;
+  mapping_profile_json: Record<string, any>;
+  rule_profile_json: Record<string, any>;
 };

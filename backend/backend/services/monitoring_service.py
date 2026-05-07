@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import or_
@@ -10,6 +11,82 @@ from backend.db import models
 
 
 class MonitoringService:
+    def _normalize_direction(self, value: Any) -> str | None:
+        direction = str(value or "").strip().upper()
+        if direction in {"INBOUND", "OUTBOUND"}:
+            return direction
+        return None
+
+    def _looks_like_invoice(self, row: Any) -> bool:
+        invoice_fields = (
+            "invoice_number",
+            "billing_document_number",
+            "invoice_total",
+            "invoice_date",
+            "due_date",
+            "payment_terms",
+            "tax_total",
+            "freight_total",
+            "receipt_number",
+            "receipt_total",
+        )
+        for field in invoice_fields:
+            value = getattr(row, field, None)
+            if value not in [None, ""]:
+                return True
+        return False
+
+    def _has_outbound_message(self, db: Session, row: Any) -> bool:
+        po_id = getattr(row, "po_id", None)
+        if not po_id:
+            return False
+        outbound = (
+            db.query(models.OutboundMessage)
+            .filter(models.OutboundMessage.po_id == po_id)
+            .filter(models.OutboundMessage.status.in_(["READY", "SENT", "BLOCKED"]))
+            .first()
+        )
+        return outbound is not None
+
+    def _infer_direction(self, row: Any) -> str:
+        explicit = self._normalize_direction(getattr(row, "direction", None))
+        if explicit in {"INBOUND", "OUTBOUND"}:
+            return explicit
+
+        outbound_markers = (
+            getattr(row, "outbound_message_id", None),
+            getattr(row, "delivered_at", None),
+            getattr(row, "dispatch_status", None),
+            getattr(row, "delivery_status", None),
+            getattr(row, "delivery_reference", None),
+            getattr(row, "target_adapter_name", None),
+            getattr(row, "target_content_type", None),
+            getattr(row, "status", None) if str(getattr(row, "status", "") or "").upper() in {"DELIVERY_QUEUED", "DELIVERED", "DELIVERY_FAILED"} else None,
+        )
+        if any(marker not in [None, ""] for marker in outbound_markers):
+            return "OUTBOUND"
+
+        message_family = str(
+            getattr(row, "message_family", None)
+            or getattr(row, "message_type", None)
+            or getattr(row, "po_type", None)
+            or getattr(row, "document_type", None)
+            or ""
+        ).strip().upper()
+        if message_family in {"AR_INVOICE", "ORDRSP", "DESADV"}:
+            return "OUTBOUND"
+        if message_family in {"AP_INVOICE", "ORDERS", "PO", "ORDER", "ORDER_CHANGE", "ASN"}:
+            return "INBOUND"
+
+        inbound_markers = (
+            getattr(row, "inbound_message_id", None),
+            getattr(row, "received_at", None),
+        )
+        if any(marker not in [None, ""] for marker in inbound_markers):
+            return "INBOUND"
+
+        return "INBOUND"
+
     def _status_group(self, status: str | None) -> str:
         s = (status or "").strip().upper()
 
@@ -59,9 +136,6 @@ class MonitoringService:
                 )
             )
 
-        if direction and direction != "ALL":
-            query = query.filter(models.PurchaseOrder.direction == direction)
-
         if search:
             s = f"%{search.lower()}%"
             query = query.filter(
@@ -82,7 +156,12 @@ class MonitoringService:
             query = query.filter(models.PurchaseOrder.created_at <= to_date)
 
         rows = query.order_by(models.PurchaseOrder.created_at.desc()).all()
-        results = [self._serialize_po(r) for r in rows]
+        results = [self._serialize_po(db, r) for r in rows]
+        if direction and direction != "ALL":
+            results = [
+                r for r in results
+                if self._normalize_direction(r.get("direction")) == direction
+            ]
         print("status_filter received=", status_filter)
         if status_filter and status_filter != "ALL":
             results = [
@@ -235,12 +314,26 @@ class MonitoringService:
 
 
 
-    def _serialize_po(self, row: Any) -> dict[str, Any]:
+    def _serialize_po(self, db: Session, row: Any) -> dict[str, Any]:
         def _safe_iso(dt):
             try:
                 return dt.isoformat() if dt else None
             except Exception:
                 return None
+
+        def _safe_json(value: Any) -> dict[str, Any]:
+            if isinstance(value, dict):
+                return value
+            if isinstance(value, str):
+                text = value.strip()
+                if text.startswith("{") and text.endswith("}"):
+                    try:
+                        parsed = json.loads(text)
+                        if isinstance(parsed, dict):
+                            return parsed
+                    except Exception:
+                        return {}
+            return {}
 
         def _safe_float(val):
             try:
@@ -285,11 +378,14 @@ class MonitoringService:
 
         if isinstance(resolution_source, dict):
             for key, value in resolution_source.items():
-                if key:
-                    mapping_full_map[str(key)] = {
-                        "key": str(key),
-                        **(value or {}),
-                    }
+                if not key:
+                    continue
+                if isinstance(value, dict):
+                    entry = dict(value)
+                else:
+                    entry = {"value": value}
+                entry["key"] = str(key)
+                mapping_full_map[str(key)] = entry
 
         if isinstance(boxes_source, dict):
             for key, bbox in boxes_source.items():
@@ -329,6 +425,14 @@ class MonitoringService:
             "order_type",
             getattr(row, "order_type", None),
         )
+        resolved_message_family_field = mapping_value(
+            "message_family",
+            getattr(row, "message_family", None) or getattr(row, "message_type", None) or getattr(row, "po_type", None),
+        )
+        resolved_message_type_field = mapping_value(
+            "message_type",
+            getattr(row, "message_type", None) or getattr(row, "message_family", None) or getattr(row, "po_type", None),
+        )
         resolved_language_code = mapping_value("language_code", None)
         resolved_currency_code = mapping_value(
             "currency_code",
@@ -340,7 +444,34 @@ class MonitoringService:
         )
         resolved_ship_to_name = mapping_value("ship_to_name", None)
         resolved_ship_to_address = mapping_value("ship_to_address", None)
-        resolved_header_details = mapping_value("header_details", None)
+        header_details_raw = getattr(row, "header_details", None)
+        resolved_header_details = mapping_value("header_details", header_details_raw if isinstance(header_details_raw, str) else None)
+        header_details_json = _safe_json(header_details_raw)
+
+        is_invoice = str(getattr(row, "po_type", "") or getattr(row, "order_type", "")).upper() == "INVOICE"
+        invoice_like_keys = {
+            "invoice_number",
+            "invoice_date",
+            "invoice_total",
+            "invoice_amount",
+            "billing_document_number",
+            "reference_po_number",
+            "payment_terms",
+            "due_date",
+            "tax_total",
+            "freight_total",
+            "gross_amount",
+            "net_amount",
+            "receipt_number",
+            "receipt_total",
+        }
+        show_invoice_fields = is_invoice or any(
+            key in header_details_json or key in mapping_full_map
+            for key in invoice_like_keys
+        )
+        show_family_fields = str(
+            resolved_message_family_field or resolved_message_type_field or resolved_document_type or ""
+        ).upper() in {"INVOICE", "AP_INVOICE", "AR_INVOICE", "ORDER_RESPONSE", "ORDER_CHANGE", "ASN", "ORDRSP", "ORDCHG", "DESADV"}
 
         default_mappings: list[dict[str, Any]] = [
             {
@@ -379,6 +510,16 @@ class MonitoringService:
                 "value": str(resolved_document_type or ""),
             },
             {
+                "key": "message_type",
+                "label": "Message Type",
+                "value": str(resolved_message_type_field or ""),
+            },
+            {
+                "key": "message_family",
+                "label": "Message Family",
+                "value": str(resolved_message_family_field or ""),
+            },
+            {
                 "key": "order_type",
                 "label": "Order Type",
                 "value": str(resolved_order_type or ""),
@@ -414,6 +555,37 @@ class MonitoringService:
                 "value": str(resolved_header_details or ""),
             },
         ]
+
+        if show_invoice_fields or show_family_fields:
+            invoice_defaults = [
+                ("invoice_number", "Invoice Number", "invoice_number", "invoice_no", "invoice", "bill_number"),
+                ("invoice_date", "Invoice Date", "invoice_date", "bill_date", "document_date"),
+                ("billing_document_number", "Billing Document Number", "billing_document_number", "billing_number", "invoice_number"),
+                ("reference_po_number", "Reference PO Number", "reference_po_number", "po_number", "original_po_number"),
+                ("invoice_total", "Invoice Total", "invoice_total", "invoice_amount", "total_amount", "grand_total", "amount_due"),
+                ("net_amount", "Net Amount", "net_amount", "subtotal", "amount"),
+                ("tax_total", "Tax Total", "tax_total", "tax", "vat"),
+                ("freight_total", "Freight Total", "freight_total", "shipping", "delivery_charge"),
+                ("due_date", "Due Date", "due_date", "payment_due_date"),
+                ("payment_terms", "Payment Terms", "payment_terms", "terms"),
+                ("receipt_number", "Receipt Number", "receipt_number", "grn_number", "goods_receipt_number"),
+                ("receipt_total", "Receipt Total", "receipt_total"),
+            ]
+
+            for key, label, *aliases in invoice_defaults:
+                raw_value = header_details_json.get(key)
+                if raw_value in [None, ""]:
+                    for alias in aliases:
+                        raw_value = header_details_json.get(alias)
+                        if raw_value not in [None, ""]:
+                            break
+                default_mappings.append(
+                    {
+                        "key": key,
+                        "label": label,
+                        "value": str(raw_value or ""),
+                    }
+                )
 
         for idx, item in enumerate(source_items):
             display_line_no = getattr(item, "line_no", None) or (idx + 1)
@@ -533,26 +705,191 @@ class MonitoringService:
                 )
 
         file_id = getattr(row, "file_id", None)
-        file_url = f"http://127.0.0.1:8000/files/{file_id}/download" if file_id else None
+        file_row = None
+        if file_id:
+            file_row = db.query(models.FileStore).filter(models.FileStore.file_id == file_id).first()
+
+        resolved_direction = self._infer_direction(row)
+        if self._has_outbound_message(db, row):
+            resolved_direction = "OUTBOUND"
+        looks_like_invoice = self._looks_like_invoice(row)
+        preview_payload_source = getattr(row, "xml_payload", None) if resolved_direction == "OUTBOUND" else None
+        if isinstance(preview_payload_source, (dict, list)):
+            preview_text = json.dumps(preview_payload_source, ensure_ascii=False, indent=2, default=str)
+        elif preview_payload_source not in [None, ""]:
+            preview_text = str(preview_payload_source)
+        else:
+            preview_text = None
+        preview_raw_text = preview_text or getattr(row, "raw_text", None)
+        file_url = None if preview_payload_source not in [None, ""] else (f"http://127.0.0.1:8000/files/{file_id}/download" if file_id else None)
+        file_name = (
+            f"{(resolved_document_number or getattr(row, 'docnum', None) or getattr(row, 'po_number', None) or row.po_id)}.txt"
+            if preview_payload_source not in [None, ""]
+            else getattr(file_row, "original_file_name", None)
+        )
+        base_mime_type = getattr(file_row, "mime_type", None) or getattr(row, "target_content_type", None) or "application/pdf"
+        explicit_message_type = str(getattr(row, "message_type", None) or "").upper()
+        invoice_context = (
+            explicit_message_type in {"INVOICE", "AP_INVOICE", "AR_INVOICE"}
+            or str(resolved_document_type or resolved_order_type or getattr(row, "po_type", None) or "").upper() == "INVOICE"
+            or looks_like_invoice
+        )
+        if explicit_message_type in {"AP_INVOICE", "AR_INVOICE"}:
+            resolved_message_type = explicit_message_type
+        elif invoice_context:
+            resolved_message_type = "AR_INVOICE" if resolved_direction == "OUTBOUND" else "AP_INVOICE"
+        else:
+            resolved_message_type = (
+                resolved_order_type
+                or resolved_document_type
+                or explicit_message_type
+                or getattr(row, "po_type", None)
+                or "ORDERS"
+            )
+        resolved_message_family = (
+            "INVOICE"
+            if invoice_context or str(resolved_message_type or "").upper() in {"INVOICE", "AP_INVOICE", "AR_INVOICE"}
+            else str(resolved_order_type or resolved_document_type or getattr(row, "po_type", None) or "ORDERS").upper()
+        )
 
         return {
             "po_id": str(getattr(row, "po_id")),
             "file_id": str(file_id) if file_id else None,
             "client_id": str(getattr(row, "client_id", "") or ""),
             "po_number": resolved_document_number,
+            "document_number": resolved_document_number,
             "po_date": resolved_document_date,
+            "document_date": resolved_document_date,
+            "invoice_number": next(
+                (
+                    entry.get("value")
+                    for entry in mappings
+                    if entry.get("key") == "invoice_number" and entry.get("value") not in [None, ""]
+                ),
+                None,
+            ),
+            "invoice_date": next(
+                (
+                    entry.get("value")
+                    for entry in mappings
+                    if entry.get("key") == "invoice_date" and entry.get("value") not in [None, ""]
+                ),
+                None,
+            ),
+            "invoice_total": next(
+                (
+                    entry.get("value")
+                    for entry in mappings
+                    if entry.get("key") == "invoice_total" and entry.get("value") not in [None, ""]
+                ),
+                None,
+            ),
+            "billing_document_number": next(
+                (
+                    entry.get("value")
+                    for entry in mappings
+                    if entry.get("key") == "billing_document_number" and entry.get("value") not in [None, ""]
+                ),
+                None,
+            ),
+            "reference_po_number": next(
+                (
+                    entry.get("value")
+                    for entry in mappings
+                    if entry.get("key") == "reference_po_number" and entry.get("value") not in [None, ""]
+                ),
+                None,
+            ),
+            "due_date": next(
+                (
+                    entry.get("value")
+                    for entry in mappings
+                    if entry.get("key") == "due_date" and entry.get("value") not in [None, ""]
+                ),
+                None,
+            ),
+            "payment_terms": next(
+                (
+                    entry.get("value")
+                    for entry in mappings
+                    if entry.get("key") == "payment_terms" and entry.get("value") not in [None, ""]
+                ),
+                None,
+            ),
+            "tax_total": next(
+                (
+                    entry.get("value")
+                    for entry in mappings
+                    if entry.get("key") == "tax_total" and entry.get("value") not in [None, ""]
+                ),
+                None,
+            ),
+            "freight_total": next(
+                (
+                    entry.get("value")
+                    for entry in mappings
+                    if entry.get("key") == "freight_total" and entry.get("value") not in [None, ""]
+                ),
+                None,
+            ),
+            "net_amount": next(
+                (
+                    entry.get("value")
+                    for entry in mappings
+                    if entry.get("key") == "net_amount" and entry.get("value") not in [None, ""]
+                ),
+                None,
+            ),
+            "receipt_number": next(
+                (
+                    entry.get("value")
+                    for entry in mappings
+                    if entry.get("key") == "receipt_number" and entry.get("value") not in [None, ""]
+                ),
+                None,
+            ),
+            "receipt_total": next(
+                (
+                    entry.get("value")
+                    for entry in mappings
+                    if entry.get("key") == "receipt_total" and entry.get("value") not in [None, ""]
+                ),
+                None,
+            ),
             "docnum": getattr(row, "docnum", None),
-            "transaction_id": getattr(row, "docnum", None),
+            "transaction_id": (
+                next(
+                    (
+                        entry.get("value")
+                        for entry in mappings
+                        if entry.get("key") == "invoice_number" and entry.get("value") not in [None, ""]
+                    ),
+                    None,
+                )
+                or next(
+                    (
+                        entry.get("value")
+                        for entry in mappings
+                        if entry.get("key") == "billing_document_number" and entry.get("value") not in [None, ""]
+                    ),
+                    None,
+                )
+                or resolved_document_number
+                or getattr(row, "docnum", None)
+            ),
             "supplier_name": getattr(row, "supplier_name", None),
             "currency": resolved_currency_code,
             "po_type": resolved_document_type,
             "order_type": resolved_order_type,
+            "message_type": resolved_message_type,
+            "message_family": resolved_message_family or resolved_message_family_field,
             "language_code": resolved_language_code,
             "header_details": resolved_header_details,
+            "invoice_fields": header_details_json if show_invoice_fields else None,
             "status": getattr(row, "status", None),
             "sender": resolved_customer_name,
             "receiver": resolved_supplier_name,
-            "direction": getattr(row, "direction", None),
+            "direction": resolved_direction,
             "environment": getattr(row, "environment", None),
             "source_type": getattr(row, "source_type", None),
             "po_confidence": getattr(row, "po_confidence", None),
@@ -562,9 +899,11 @@ class MonitoringService:
             "processed_at": _safe_iso(getattr(row, "processed_at", None)),
             "delivered_at": _safe_iso(getattr(row, "delivered_at", None)),
             "file_url": file_url,
-            "file_name": None,
-            "mime_type": "application/pdf",
-            "raw_text": getattr(row, "raw_text", None),
+            "file_name": file_name,
+            "mime_type": (
+                base_mime_type
+            ),
+            "raw_text": preview_raw_text,
             "xml_payload": getattr(row, "xml_payload", None),
             "items": items,
             "mappings": mappings,

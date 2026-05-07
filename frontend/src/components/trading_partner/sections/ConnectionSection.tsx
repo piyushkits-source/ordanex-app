@@ -69,7 +69,34 @@ function normalizeConfig(type: string, config: Record<string, any> | null | unde
     c.email_address = c.mailbox_address;
   }
 
+  if (type === "EMAIL") {
+    if (c.host && !c.imap_host) c.imap_host = c.host;
+    if (c.imap_port && !c.port) c.port = c.imap_port;
+    if (c.mailbox && !c.folder) c.folder = c.mailbox;
+    if (!c.username && c.email_address) c.username = c.email_address;
+    if (!c.folder) c.folder = "INBOX";
+  }
+
   return c;
+}
+
+function validateConnection(form: PartnerConnection) {
+  if (!form.connection_name?.trim()) {
+    return "Connection Name is required.";
+  }
+
+  const cfg = normalizeConfig(form.connection_type, form.config_json);
+  if (form.connection_type !== "EMAIL" || !form.is_active) {
+    return null;
+  }
+
+  const missing = ["email_address", "imap_host", "username", "password_token"].filter(
+    (key) => !String(cfg?.[key] || "").trim()
+  );
+
+  return missing.length > 0
+    ? `Missing required EMAIL settings: ${missing.join(", ")}`
+    : null;
 }
 
 function getConnectionDetails(row: PartnerConnection) {
@@ -119,6 +146,7 @@ export default function ConnectionSection({
   const [form, setForm] = useState<PartnerConnection>(emptyConnection(partner));
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [actionBusyKey, setActionBusyKey] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
 
   const dynamicFields = useMemo(
@@ -151,8 +179,9 @@ export default function ConnectionSection({
 
   async function saveConnection() {
     try {
-      if (!form.connection_name?.trim()) {
-        throw new Error("Connection Name is required.");
+      const validationError = validateConnection(form);
+      if (validationError) {
+        throw new Error(validationError);
       }
 
       setSaving(true);
@@ -182,6 +211,40 @@ export default function ConnectionSection({
       onBanner(err?.message || "Unable to save partner connection.");
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function testConnection(row: PartnerConnection) {
+    try {
+      setActionBusyKey(`test:${row.connection_id}`);
+      const res = await apiFetch(`${API_BASE}/connections/${row.connection_id}/test`, {
+        method: "POST",
+      });
+      if (!res.ok) throw new Error(await parseApiError(res));
+      const data = await res.json();
+      onBanner(data.message || "Connection test succeeded.");
+    } catch (err: any) {
+      onBanner(err?.message || "Unable to test connection.");
+    } finally {
+      setActionBusyKey(null);
+    }
+  }
+
+  async function pollConnection(row: PartnerConnection) {
+    try {
+      setActionBusyKey(`poll:${row.connection_id}`);
+      const res = await apiFetch(`${API_BASE}/connections/${row.connection_id}/poll`, {
+        method: "POST",
+      });
+      if (!res.ok) throw new Error(await parseApiError(res));
+      const data = await res.json();
+      onBanner(
+        `Email poll complete. Imported ${data.imported ?? 0}, skipped ${data.skipped ?? 0}, errors ${data.errors ?? 0}.`
+      );
+    } catch (err: any) {
+      onBanner(err?.message || "Unable to run email poll.");
+    } finally {
+      setActionBusyKey(null);
     }
   }
 
@@ -295,13 +358,26 @@ export default function ConnectionSection({
             style={input}
           >
             <option value="PO">PO</option>
+            <option value="ORDERS">ORDERS</option>
+            <option value="ORDRSP">ORDRSP</option>
+            <option value="ORDCHG">ORDCHG</option>
+            <option value="DESADV">DESADV</option>
+            <option value="INVOIC">INVOIC</option>
+            <option value="850">850</option>
+            <option value="810">810</option>
             <option value="ORDER_CONFIRMATION">Order Confirmation</option>
+            <option value="ORDER_RESPONSE">Order Response</option>
+            <option value="ORDER_CHANGE">Order Change</option>
             <option value="ASN">ASN</option>
+            <option value="AP_INVOICE">AP Invoice</option>
+            <option value="AR_INVOICE">AR Invoice</option>
             <option value="INVOICE">Invoice</option>
             <option value="DELFOR">Forecast</option>
-            <option value="ORDER_RESPONSE">Order Response</option>
           </select>
         )}
+        <div style={{ gridColumn: "1 / -1", marginTop: -6, marginBottom: 6, fontSize: 12, color: "#64748b" }}>
+          Use ERP-native values like ORDERS, ORDRSP, ORDCHG, DESADV, INVOIC, 810, AP_INVOICE, or AR_INVOICE to match the partner's supported message family.
+        </div>
 
         {field(
           "Message Version",
@@ -345,6 +421,20 @@ export default function ConnectionSection({
         <button type="button" style={primaryButton} onClick={saveConnection} disabled={saving}>
           {saving ? "Saving..." : editingId ? "Update Connection" : "Save Connection"}
         </button>
+
+        {editingId && form.connection_type === "EMAIL" ? (
+          <button
+            type="button"
+            style={secondaryButton}
+            onClick={() => {
+              const row = rows.find((item) => String(item.connection_id) === editingId);
+              if (row) void testConnection(row);
+            }}
+            disabled={actionBusyKey === `test:${editingId}`}
+          >
+            {actionBusyKey === `test:${editingId}` ? "Testing..." : "Test Connection"}
+          </button>
+        ) : null}
 
         {editingId ? (
           <button type="button" style={secondaryButton} onClick={resetForm}>
@@ -395,6 +485,26 @@ export default function ConnectionSection({
                       <button type="button" style={miniButton} onClick={() => editRow(r)}>
                         Edit
                       </button>
+                      {r.connection_type === "EMAIL" ? (
+                        <button
+                          type="button"
+                          style={miniButton}
+                          onClick={() => void testConnection(r)}
+                          disabled={actionBusyKey === `test:${r.connection_id}`}
+                        >
+                          {actionBusyKey === `test:${r.connection_id}` ? "Testing..." : "Test"}
+                        </button>
+                      ) : null}
+                      {r.connection_type === "EMAIL" ? (
+                        <button
+                          type="button"
+                          style={miniButton}
+                          onClick={() => void pollConnection(r)}
+                          disabled={actionBusyKey === `poll:${r.connection_id}`}
+                        >
+                          {actionBusyKey === `poll:${r.connection_id}` ? "Polling..." : "Poll Now"}
+                        </button>
+                      ) : null}
                       <button type="button" style={miniButton} onClick={() => toggleActive(r)}>
                         {r.is_active ? "Deactivate" : "Activate"}
                       </button>

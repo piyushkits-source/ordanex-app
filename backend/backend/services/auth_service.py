@@ -8,6 +8,7 @@ from jose import JWTError, jwt
 from sqlalchemy.orm import Session
 
 from backend.db import models, schemas
+from backend.core.environment import current_environment
 
 SECRET_KEY = "change-this-in-env"
 ALGORITHM = "HS256"
@@ -34,7 +35,13 @@ def decode_access_token(token: str) -> dict[str, Any]:
 
 class AuthService:
     def login(self, db: Session, payload: schemas.LoginRequest) -> schemas.LoginResponse:
-        user = db.query(models.User).filter(models.User.email == payload.email).first()
+        env = current_environment()
+        user = (
+            db.query(models.User)
+            .filter(models.User.email == payload.email)
+            .filter((models.User.environment == env) | (models.User.environment.is_(None)))
+            .first()
+        )
         if not user:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -50,10 +57,11 @@ class AuthService:
 
         token = create_access_token(
             {
-                "sub": str(user.user_id),
+                "sub": user.email,
                 "email": user.email,
                 "role": user.role,
                 "client_id": user.client_id,
+                "environment": (user.environment or env).lower(),
             }
         )
 
@@ -64,6 +72,7 @@ class AuthService:
             email=user.email,
             role=user.role,
             client_id=user.client_id,
+            environment=(user.environment or env).lower(),
         )
 
 

@@ -39,7 +39,7 @@ def map_line_item_fields(item_row: dict[str, Any], item_mapping: dict) -> dict:
         "material_code": item_row.get(item_mapping.get("material_field", "material")),
         "description": item_row.get(item_mapping.get("description_field", "description")),
         "quantity": item_row.get(item_mapping.get("quantity_field", "quantity")),
-        "uom": item_row.get(item_mapping.get("uom_field", "uom")) or item_mapping.get("uom_default", "EA"),
+        "uom": item_row.get(item_mapping.get("uom_field", "uom")) or item_mapping.get("uom_default"),
         "unit_price": item_row.get(item_mapping.get("price_field", "unit_price")),
         "amount": item_row.get(item_mapping.get("amount_field", "amount")),
         "delivery_date": item_row.get(item_mapping.get("delivery_date_field", "delivery_date")),

@@ -1,0 +1,126 @@
+{
+  "vendor": "GREEN_BAY,_WI_54308-9229_Page_1_of_1",
+  "column_x_ranges": {
+    "line_no": {
+      "x_start": 20,
+      "x_end": 560,
+      "x_mid": 290.0
+    },
+    "description": {
+      "x_start": 20,
+      "x_end": 560,
+      "x_mid": 290.0
+    },
+    "quantity": {
+      "x_start": 20,
+      "x_end": 560,
+      "x_mid": 290.0
+    },
+    "uom": {
+      "x_start": 20,
+      "x_end": 560,
+      "x_mid": 290.0
+    },
+    "unit_price": {
+      "x_start": 20,
+      "x_end": 560,
+      "x_mid": 290.0
+    },
+    "amount": {
+      "x_start": 20,
+      "x_end": 560,
+      "x_mid": 290.0
+    },
+    "material": {
+      "x_start": 20,
+      "x_end": 560,
+      "x_mid": 290.0
+    },
+    "delivery_date": {
+      "x_start": 20,
+      "x_end": 560,
+      "x_mid": 290.0
+    }
+  },
+  "header_hints": {
+    "line_no": [
+      "item",
+      "description",
+      "qty",
+      "unit",
+      "price",
+      "amount",
+      "date"
+    ],
+    "material": [
+      "item",
+      "description",
+      "qty",
+      "unit",
+      "price",
+      "amount",
+      "date"
+    ],
+    "description": [
+      "item",
+      "description",
+      "qty",
+      "unit",
+      "price",
+      "amount",
+      "date"
+    ],
+    "delivery_date": [
+      "item",
+      "description",
+      "qty",
+      "unit",
+      "price",
+      "amount",
+      "date"
+    ],
+    "quantity": [
+      "item",
+      "description",
+      "qty",
+      "unit",
+      "price",
+      "amount",
+      "date"
+    ],
+    "uom": [
+      "item",
+      "description",
+      "qty",
+      "unit",
+      "price",
+      "amount",
+      "date"
+    ],
+    "unit_price": [
+      "item",
+      "description",
+      "qty",
+      "unit",
+      "price",
+      "amount",
+      "date"
+    ],
+    "amount": [
+      "item",
+      "description",
+      "qty",
+      "unit",
+      "price",
+      "amount",
+      "date"
+    ]
+  },
+  "layout_signatures": [
+    "GREEN_BAY,_WI_54308-9229_Page_1_of_1_P1_1_0"
+  ],
+  "preferred_page_regions": {
+    "table_page": 1
+  },
+  "last_updated": "2026-04-23 18:14:59.903102+00:00"
+}

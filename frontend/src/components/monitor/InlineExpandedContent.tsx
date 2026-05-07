@@ -11,7 +11,7 @@ export default function InlineExpandedContent({ row, selectedField, onSelectFiel
       <div style={{ display: "grid", gridTemplateColumns: "1.04fr 0.96fr", gap: 14 }}>
         <div style={{ background: "#fff", border: "1px solid #dbe4ee", borderRadius: 12, padding: 14 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-            <div style={{ fontWeight: 800, fontSize: 16, color: "#0f172a" }}>PO Viewer</div>
+            <div style={{ fontWeight: 800, fontSize: 16, color: "#0f172a" }}>Document Viewer</div>
             <div style={{ display: "flex", gap: 8 }}>
               <button style={smallIconBtn} title="Download Original"><FaDownload /></button>
               <button style={smallIconBtn} title="Download Transformed XML"><FaDownload /></button>
@@ -19,7 +19,12 @@ export default function InlineExpandedContent({ row, selectedField, onSelectFiel
               <button style={smallIconBtn} title="Processing Flow"><FaProjectDiagram /></button>
             </div>
           </div>
-          <DocumentViewer fileUrl={row.fileUrl} fileName={row.fileName} mimeType={row.mimeType} rawText={row.rawText} />
+          <DocumentViewer
+            fileUrl={row.fileUrl || (row as any).file_url}
+            fileName={row.fileName || (row as any).file_name}
+            mimeType={row.mimeType || (row as any).mime_type}
+            rawText={row.rawText || (row as any).raw_text}
+          />
         </div>
 
         <div style={{ background: "#fff", border: "1px solid #dbe4ee", borderRadius: 12, padding: 14, display: "grid", gap: 14 }}>

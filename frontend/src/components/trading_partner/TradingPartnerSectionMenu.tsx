@@ -13,6 +13,7 @@ import {
   FaRobot,
   FaHistory,
   FaBoxOpen,
+  FaExchangeAlt,
 } from "react-icons/fa";
 
 type SectionKey =
@@ -29,7 +30,8 @@ type SectionKey =
   | "notifications"
   | "bulk"
   | "ai"
-  | "audit";
+  | "audit"
+  | "promotion";
 
 type MenuGroup = {
   title: string;
@@ -67,6 +69,7 @@ const groups: MenuGroup[] = [
       { key: "notifications", label: "Notifications", icon: <FaBell /> },
       { key: "bulk", label: "Bulk Upload", icon: <FaUpload /> },
       { key: "ai", label: "AI Onboarding", icon: <FaRobot /> },
+      { key: "promotion", label: "Promotion", icon: <FaExchangeAlt /> },
       { key: "audit", label: "Audit", icon: <FaHistory /> },
     ],
   },

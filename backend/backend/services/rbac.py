@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from fastapi import Depends, Header, HTTPException, status
 from sqlalchemy.orm import Session
 
+from backend.core.environment import current_environment
 from backend.core.security import decode_access_token
 from backend.db.database import get_db
 from backend.db import models
@@ -16,6 +17,7 @@ class UserContext:
     email: str
     role: str
     client_id: str | None
+    environment: str
 
 
 def _extract_bearer_token(authorization: str | None) -> str:
@@ -56,7 +58,20 @@ def get_current_user(
             detail="Invalid token payload",
         )
 
-    user = db.query(models.User).filter(models.User.email == email).first()
+    token_env = (payload.get("environment") or current_environment()).strip().lower()
+    env = current_environment()
+    if token_env != env:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token environment mismatch",
+        )
+
+    user = (
+        db.query(models.User)
+        .filter(models.User.email == email)
+        .filter((models.User.environment == env) | (models.User.environment.is_(None)))
+        .first()
+    )
     if not user or not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -68,6 +83,7 @@ def get_current_user(
         email=user.email,
         role=user.role,
         client_id=user.client_id,
+        environment=(user.environment or env),
     )
 
 

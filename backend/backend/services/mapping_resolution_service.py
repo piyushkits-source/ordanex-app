@@ -11,10 +11,11 @@ def resolve_mapping_profile(
     document_type: str,
     input_format: str,
 ):
+    partner_key = str(partner_id)
     row = (
         db.query(models.TradingPartnerMappingProfile)
         .filter(
-            models.TradingPartnerMappingProfile.partner_id == partner_id,
+            models.TradingPartnerMappingProfile.partner_id == partner_key,
             models.TradingPartnerMappingProfile.document_type == document_type,
             models.TradingPartnerMappingProfile.input_format == input_format,
         )

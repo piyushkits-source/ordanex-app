@@ -5,22 +5,23 @@ import {
   FaChevronDown,
   FaCog,
   FaUsers,
-  FaPlug,
-  FaSlidersH,
   FaFileAlt,
   FaChartBar,
   FaSignOutAlt,
   FaHome,
 } from "react-icons/fa";
 import { clearAuth, getAuth } from "../../utils/auth";
+import { canAccessModule, type AppModuleKey } from "../../utils/access";
+import { getFrontendEnvironmentLabel, workspaceEnvironmentBadge } from "../../utils/environment";
+import { useAppScope } from "../../context/AppScopeContext";
 
 const menuItems = [
-  { label: "Message Monitor", path: "/monitoring", icon: <FaHome /> },
-  { label: "Client Configuration", path: "/client-config", icon: <FaCog /> },
-  { label: "Trading Partner", path: "/client-config", icon: <FaCog /> },
-  { label: "User Management", path: "/users", icon: <FaUsers /> },
-  { label: "Reports", path: "/reports", icon: <FaFileAlt /> },
-  { label: "Analytics", path: "/analytics", icon: <FaChartBar /> },
+  { label: "Message Monitor", path: "/monitoring", icon: <FaHome />, moduleKey: "monitoring" as AppModuleKey },
+  { label: "Client Configuration", path: "/client-config", icon: <FaCog />, moduleKey: "client_config" as AppModuleKey },
+  { label: "Trading Partner", path: "/trading-partners", icon: <FaCog />, moduleKey: "trading_partners" as AppModuleKey },
+  { label: "User Management", path: "/users", icon: <FaUsers />, moduleKey: "users" as AppModuleKey },
+  { label: "Reports", path: "/reports", icon: <FaFileAlt />, moduleKey: "reports" as AppModuleKey },
+  { label: "Analytics", path: "/analytics", icon: <FaChartBar />, moduleKey: "analytics" as AppModuleKey },
 ];
 
 export default function UserMenu() {
@@ -29,6 +30,8 @@ export default function UserMenu() {
   const navigate = useNavigate();
   const location = useLocation();
   const auth = getAuth();
+  const { scope } = useAppScope();
+  const environment = scope.environment ? workspaceEnvironmentBadge(scope.environment) : getFrontendEnvironmentLabel();
 
   useEffect(() => {
     const close = (event: MouseEvent) => {
@@ -44,6 +47,10 @@ export default function UserMenu() {
     if (auth?.email) return auth.email.split("@")[0];
     return "User";
   }, [auth]);
+  const visibleItems = useMemo(
+    () => menuItems.filter((item) => canAccessModule(auth, item.moduleKey)),
+    [auth]
+  );
 
   function handleLogout() {
     clearAuth();
@@ -67,10 +74,18 @@ export default function UserMenu() {
           <div style={menuHeader}>
             <div style={menuHeaderName}>{auth?.email || "Signed in"}</div>
             <div style={menuHeaderRole}>{auth?.role || ""}</div>
+            {auth?.subscription_type ? (
+              <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 4 }}>
+                Subscription: {auth.subscription_type}
+              </div>
+            ) : null}
+            <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 4 }}>
+              Environment: {environment}
+            </div>
           </div>
 
           <div style={{ display: "grid", gap: 4 }}>
-            {menuItems.map((item) => {
+            {visibleItems.map((item) => {
               const active = location.pathname === item.path;
               return (
                 <Link

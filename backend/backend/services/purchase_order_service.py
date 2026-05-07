@@ -12,7 +12,15 @@ from backend.services.idoc_mapping_orchestrator import orchestrate_mapping_and_r
 from backend.services.adapter_registry import get_target_adapter
 from backend.services.connector_registry import get_connector
 from backend.services.parsed_payload_builder import build_parsed_payload_from_po
+from backend.services.invoice_validation_service import (
+    validate_inbound_ap_invoice_3way,
+    request_invoice_approval,
+    validate_outbound_invoice_totals,
+)
 
+
+DOCUMENT_TYPE_ALIASES = {"PO", "ORDER_RESPONSE", "ORDER_CHANGE", "ASN", "INVOICE"}
+INVOICE_MESSAGE_TYPES = {"INVOICE", "AP_INVOICE", "AR_INVOICE"}
 
 
 def parse_date_safe(value):
@@ -22,6 +30,42 @@ def parse_date_safe(value):
         return datetime.fromisoformat(str(value)).date()
     except Exception:
         return None
+
+
+def resolve_document_type(db: Session, po) -> str:
+    for candidate in (
+        getattr(po, "po_type", None),
+        getattr(po, "order_type", None),
+        getattr(po, "message_type", None),
+        getattr(po, "target_message_type", None),
+        getattr(po, "invoice_profile_type", None),
+    ):
+        doc_type = str(candidate or "").strip().upper()
+        if doc_type in DOCUMENT_TYPE_ALIASES:
+            return doc_type
+        if doc_type in INVOICE_MESSAGE_TYPES:
+            return "INVOICE"
+
+    if getattr(po, "inbound_message_id", None):
+        inbound = (
+            db.query(models.InboundMessage)
+            .filter(models.InboundMessage.inbound_message_id == po.inbound_message_id)
+            .first()
+        )
+        inbound_doc_type = str(getattr(inbound, "message_type", "") or "").strip().upper()
+        if inbound_doc_type in DOCUMENT_TYPE_ALIASES:
+            return inbound_doc_type
+
+    return "PO"
+
+
+def resolve_default_target_profile(document_type: str) -> tuple[str, str, str, str]:
+    doc_type = (document_type or "PO").upper()
+    if doc_type == "INVOICE":
+        return ("D365", "JSON", "INVOICE", "v1")
+    if doc_type in {"ORDER_RESPONSE", "ORDER_CHANGE", "ASN"}:
+        return ("GENERIC", "JSON", doc_type, "v1")
+    return ("SAP", "IDOC", "ORDERS", "ORDERS05")
 
 
 class PurchaseOrderService:
@@ -263,7 +307,7 @@ class PurchaseOrderService:
             ) 
     
 
-    def process_purchase_order(self, db: Session, po_id, user_ctx: UserContext) -> dict:
+    def process_purchase_order(self, db: Session, po_id, user_ctx: UserContext, *, skip_invoice_validation: bool = False) -> dict:
         po = self.get_purchase_order(db, po_id)
 
         po.status = "TRANSFORMED"
@@ -315,6 +359,73 @@ class PurchaseOrderService:
             # ===============================
             po.canonical_json = canonical
 
+            document_type = resolve_document_type(db, po)
+            invoice_validation_result = None
+            if document_type == "INVOICE" and not skip_invoice_validation:
+                if (po.direction or "INBOUND").upper() == "OUTBOUND":
+                    invoice_validation_result = validate_outbound_invoice_totals(po, canonical)
+                else:
+                    invoice_validation_result = validate_inbound_ap_invoice_3way(db, po, canonical)
+
+                po.po_validation_reason = invoice_validation_result.get("reason")
+                po.needs_review = not invoice_validation_result.get("passed", False)
+                po.review_status = (
+                    "INVOICE_VALIDATION_PASSED"
+                    if invoice_validation_result.get("passed")
+                    else "INVOICE_VALIDATION_PENDING"
+                )
+
+                if invoice_validation_result.get("blocked"):
+                    po.status = "PENDING"
+                    po.updated_at = models.func.now()
+                    po.needs_review = True
+                    po.review_status = "AWAITING_APPROVAL"
+                    db.add(po)
+
+                    self._write_log(
+                        db,
+                        po,
+                        "ERROR",
+                        "VALIDATION",
+                        invoice_validation_result.get("reason") or "Invoice validation blocked processing.",
+                        getattr(user_ctx, "email", None),
+                    )
+
+                    db.commit()
+                    db.refresh(po)
+                    try:
+                        approval_email_result = request_invoice_approval(
+                            db,
+                            po=po,
+                            validation_result=invoice_validation_result,
+                            canonical=canonical,
+                        )
+                        self._write_log(
+                            db,
+                            po,
+                            "INFO",
+                            "INVOICE_APPROVAL_REQUEST",
+                            f"Approval request email sent to {', '.join(approval_email_result.get('recipients') or []) or 'configured approvers'}.",
+                            getattr(user_ctx, "email", None),
+                        )
+                        db.commit()
+                    except Exception as notify_err:
+                        self._write_log(
+                            db,
+                            po,
+                            "ERROR",
+                            "INVOICE_APPROVAL_REQUEST_FAILED",
+                            str(notify_err),
+                            getattr(user_ctx, "email", None),
+                        )
+                        db.commit()
+                    return {
+                        "status": "PENDING",
+                        "po_id": str(po.po_id),
+                        "canonical": canonical,
+                        "validation_result": invoice_validation_result,
+                    }
+
             # ===============================
             # STEP 3 — FLOW + ADAPTER
             # ===============================
@@ -324,18 +435,20 @@ class PurchaseOrderService:
                     db.query(models.MessageFlow)
                     .filter(
                         models.MessageFlow.partner_id == po.partner_id,
-                        models.MessageFlow.document_type == "PO",
+                        models.MessageFlow.document_type == document_type,
                         models.MessageFlow.is_active == True,
                     )
                     .order_by(models.MessageFlow.priority.asc())
                     .first()
                 )
 
+            default_target_erp, default_target_standard, default_target_type, default_target_version = resolve_default_target_profile(document_type)
+
             adapter = get_target_adapter(
-                target_erp=(flow.target_erp if flow else "SAP"),
-                target_standard=(flow.target_message_standard if flow else "IDOC"),
-                target_message_type=(flow.target_message_type if flow else "ORDERS"),
-                target_message_version=(flow.target_message_version if flow else "ORDERS05"),
+                target_erp=(flow.target_erp if flow else default_target_erp),
+                target_standard=(flow.target_message_standard if flow else default_target_standard),
+                target_message_type=(flow.target_message_type if flow else default_target_type),
+                target_message_version=(flow.target_message_version if flow else default_target_version),
             )
 
             built = adapter.build(canonical, flow=flow)
@@ -541,7 +654,7 @@ class PurchaseOrderService:
             # STEP 2 — APPLY OVERRIDE (if provided)
             # =========================================
             target_erp = payload.target_erp or "SAP"
-            message_type = payload.message_type or "ORDERS"
+            message_type = payload.message_type or resolve_document_type(db, po)
             message_version = payload.message_version or "ORDERS05"
 
             adapter = get_target_adapter(
@@ -649,13 +762,15 @@ class PurchaseOrderService:
         # =========================================
         # LOAD FLOW
         # =========================================
+        document_type = resolve_document_type(db, po)
+
         flow = None
         if hasattr(models, "MessageFlow"):
             flow = (
                 db.query(models.MessageFlow)
                 .filter(
                     models.MessageFlow.partner_id == po.partner_id,
-                    models.MessageFlow.document_type == "PO",
+                    models.MessageFlow.document_type == document_type,
                     models.MessageFlow.is_active == True,
                 )
                 .first()

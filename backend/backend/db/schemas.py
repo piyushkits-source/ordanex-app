@@ -207,6 +207,7 @@ class TradingPartnerConnectionRead(TradingPartnerConnectionCreate):
 
 class UserCreate(BaseModel):
     client_id: str | None = None
+    environment: str | None = None
     email: EmailStr
     password: str
     role: str
@@ -215,6 +216,7 @@ class UserCreate(BaseModel):
 
 class UserUpdate(BaseModel):
     client_id: str | None = None
+    environment: str | None = None
     email: EmailStr | None = None
     password: str | None = None
     role: str | None = None
@@ -228,6 +230,7 @@ class UserStatusUpdate(BaseModel):
 class UserRead(BaseModel):
     user_id: Any
     client_id: str | None = None
+    environment: str | None = None
     email: EmailStr
     role: str
     is_active: bool
@@ -251,6 +254,8 @@ class LoginResponse(BaseModel):
     email: EmailStr
     role: str
     client_id: str | None = None
+    environment: str | None = None
+    subscription_type: str | None = None
 
 # =========================================================
 # MAPPINGS
@@ -566,6 +571,7 @@ class PartnerUomRuleRead(PartnerUomRuleBase):
 
 class MappingProfileCreate(BaseModel):
     client_id: str
+    partner_id: str | None = None
     profile_name: str
     sold_to: str | None = None
     ship_to: str | None = None
@@ -578,6 +584,7 @@ class MappingProfileCreate(BaseModel):
 
 class MappingProfileUpdate(BaseModel):
     client_id: str | None = None
+    partner_id: str | None = None
     profile_name: str | None = None
     sold_to: str | None = None
     ship_to: str | None = None
@@ -591,6 +598,7 @@ class MappingProfileUpdate(BaseModel):
 class MappingProfileRead(BaseModel):
     mapping_profile_id: Any
     client_id: str
+    partner_id: str | None = None
     profile_name: str
     sold_to: str | None = None
     ship_to: str | None = None

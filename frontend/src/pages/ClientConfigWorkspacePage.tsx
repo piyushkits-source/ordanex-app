@@ -37,7 +37,8 @@ export default function ClientConfigWorkspacePage() {
   const [banner, setBanner] = useState<{ type: "success" | "error" | "info"; text: string } | null>(null);
   const [createMode, setCreateMode] = useState(false);
 
-  const { scope, setClientScope, setVerticalScope } = useAppScope();
+  const { scope, setClientScope, setVerticalScope, setEnvironmentScope } = useAppScope();
+  const isProductionSelected = String(scope.environment || "PROD").toUpperCase() === "PROD";
 
   const selectedClient = useMemo(
     () => clients.find((c) => c.client_id === selectedClientId) || null,
@@ -160,16 +161,33 @@ export default function ClientConfigWorkspacePage() {
                 <div style={{ marginTop: 6, fontSize: 12, color: "#475569" }}>
                   Vertical: {scope.verticalName || scope.verticalId || "Not Selected"}
                 </div>
+                <div style={{ marginTop: 6, fontSize: 12, color: "#475569" }}>
+                  Environment: {String(scope.environment || "PROD").toUpperCase() === "PROD" ? "Production" : "Staging"}
+                </div>
               </>
             )}
           </div>
 
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <select
+              value={scope.environment || "PROD"}
+              onChange={(e) => setEnvironmentScope(e.target.value)}
+              style={envSelect}
+            >
+              <option value="PROD">Production</option>
+              <option value="STAGING">Staging</option>
+            </select>
             <div style={statusChip}>{createMode ? "Create Mode" : "Workspace Mode"}</div>
             <div style={statusChipMuted}>{sections.find((s) => s.key === activeSection)?.label}</div>
           </div>
         </div>
       </div>
+
+      {isProductionSelected ? (
+        <div style={productionBanner}>
+          Production is read-only for configuration. Switch the active environment to Staging to create, edit, or update Client Configuration.
+        </div>
+      ) : null}
 
       <div style={layout}>
         <div style={leftPanel}>
@@ -313,3 +331,5 @@ const bannerStyle: React.CSSProperties = { marginBottom: 14, border: "1px solid"
 const newButton: React.CSSProperties = { border: "1px solid #0b5fff", background: "#0b5fff", color: "#fff", borderRadius: 10, padding: "8px 12px", cursor: "pointer", fontWeight: 700, fontSize: 12 };
 const statusChip: React.CSSProperties = { border: "1px solid #bfdbfe", background: "#eff6ff", color: "#1d4ed8", borderRadius: 999, padding: "6px 10px", fontSize: 12, fontWeight: 700 };
 const statusChipMuted: React.CSSProperties = { border: "1px solid #e5e7eb", background: "#fff", color: "#475569", borderRadius: 999, padding: "6px 10px", fontSize: 12, fontWeight: 700 };
+const envSelect: React.CSSProperties = { minHeight: 34, borderRadius: 999, border: "1px solid #dbe4ee", background: "#fff", color: "#0f172a", padding: "6px 12px", fontSize: 12, fontWeight: 700 };
+const productionBanner: React.CSSProperties = { marginBottom: 14, border: "1px solid #fecaca", borderRadius: 10, padding: "10px 12px", fontSize: 13, fontWeight: 600, color: "#b91c1c", background: "#fef2f2" };

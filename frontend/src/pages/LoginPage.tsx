@@ -2,6 +2,7 @@ import React, { useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { getPostLoginPath, saveAuth } from "../utils/auth";
 import { parseApiError } from "../utils/api";
+import ordanexLoginImage from "../assets/ordanex-login.png";
 
 const API_BASE = "";
 
@@ -52,28 +53,47 @@ export default function LoginPage() {
     <div style={pageShell}>
       <div style={layoutShell}>
         <div style={brandingPanel}>
+          <div style={brandingGlowLarge} />
+          <div style={brandingGlowSmall} />
           <div style={brandingOverlay}>
-            <img
-              src="/assets/ordanex-login.png"
-              alt="Ordanex"
-              style={brandImage}
-              onError={(e) => {
-                (e.currentTarget as HTMLImageElement).style.display = "none";
-              }}
-            />
+            <div style={brandBadge}>Enterprise Order Intelligence</div>
+            <div style={brandImageFrame}>
+              <img
+                src={ordanexLoginImage}
+                alt="Ordanex"
+                style={brandImage}
+                onError={(e) => {
+                  (e.currentTarget as HTMLImageElement).style.display = "none";
+                }}
+              />
+            </div>
 
             <div style={brandTextWrap}>
-              <div style={brandTitle}>Ordanex</div>
-              <div style={brandSubtitle}>From Documents to Decisions</div>
+              <div style={brandTitle}>From Documents to Decisions</div>
+              <div style={brandSubtitle}>Built for high-trust trading partner automation</div>
               <div style={brandDescription}>
-                AI-powered order automation for seamless document intake,
-                intelligent extraction, partner mapping, and ERP-ready processing.
+                Unify intake, extraction, mapping, validation, and ERP-ready message generation in one operational workspace.
+              </div>
+
+              <div style={metricGrid}>
+                <div style={metricCard}>
+                  <div style={metricValue}>Multi-Channel</div>
+                  <div style={metricLabel}>Email, API, EDI, SFTP</div>
+                </div>
+                <div style={metricCard}>
+                  <div style={metricValue}>AI + Rules</div>
+                  <div style={metricLabel}>Robust extraction and mapping</div>
+                </div>
+                <div style={metricCard}>
+                  <div style={metricValue}>ERP Ready</div>
+                  <div style={metricLabel}>Canonical, XML, IDOC outputs</div>
+                </div>
               </div>
 
               <div style={featureList}>
-                <div>• Email / API / EDI ingestion</div>
-                <div>• Smart extraction and validation</div>
-                <div>• ERP-ready transformation and routing</div>
+                <div style={featurePill}>Straight-through processing</div>
+                <div style={featurePill}>Trading partner onboarding</div>
+                <div style={featurePill}>Operational monitoring</div>
               </div>
             </div>
           </div>
@@ -84,7 +104,7 @@ export default function LoginPage() {
             <div style={eyebrow}>Welcome back</div>
             <div style={title}>Sign in</div>
             <div style={subtitle}>
-              Access your monitoring, client configuration, onboarding, and automation workspace.
+              Access your monitoring, client configuration, onboarding, analytics, and automation workspace.
             </div>
 
             {error ? <div style={errorBanner}>{error}</div> : null}
@@ -144,7 +164,7 @@ export default function LoginPage() {
 
 const pageShell: React.CSSProperties = {
   minHeight: "100vh",
-  background: "#f8fafc",
+  background: "radial-gradient(circle at top left, #dbeafe 0%, #eff6ff 28%, #f8fafc 62%, #f8fafc 100%)",
   padding: 24,
   display: "flex",
   alignItems: "center",
@@ -157,106 +177,196 @@ const layoutShell: React.CSSProperties = {
   minHeight: 720,
   display: "grid",
   gridTemplateColumns: "1.05fr 0.95fr",
-  background: "#ffffff",
-  border: "1px solid #e5e7eb",
-  borderRadius: 24,
+  background: "rgba(255,255,255,0.82)",
+  border: "1px solid rgba(219,228,238,0.9)",
+  borderRadius: 28,
   overflow: "hidden",
-  boxShadow: "0 20px 60px rgba(15,23,42,0.10)",
+  boxShadow: "0 28px 80px rgba(15,23,42,0.16)",
+  backdropFilter: "blur(14px)",
 };
 
 const brandingPanel: React.CSSProperties = {
   position: "relative",
-  background: "linear-gradient(135deg, #eff6ff 0%, #dbeafe 35%, #e0f2fe 100%)",
+  background: "linear-gradient(155deg, #eaf3ff 0%, #d8e8ff 34%, #d7efff 100%)",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  padding: 56,
+  overflow: "hidden",
+};
+
+const brandingOverlay: React.CSSProperties = {
+  position: "relative",
+  zIndex: 1,
+  width: "100%",
+  maxWidth: 540,
+  display: "flex",
+  flexDirection: "column",
+  alignItems: "center",
+  textAlign: "center",
+  gap: 22,
+};
+
+const brandingGlowLarge: React.CSSProperties = {
+  position: "absolute",
+  width: 340,
+  height: 340,
+  borderRadius: "50%",
+  background: "radial-gradient(circle, rgba(37,99,235,0.18) 0%, rgba(37,99,235,0) 72%)",
+  top: -80,
+  left: -40,
+};
+
+const brandingGlowSmall: React.CSSProperties = {
+  position: "absolute",
+  width: 260,
+  height: 260,
+  borderRadius: "50%",
+  background: "radial-gradient(circle, rgba(14,165,233,0.18) 0%, rgba(14,165,233,0) 74%)",
+  bottom: -90,
+  right: -40,
+};
+
+const brandBadge: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  padding: "8px 14px",
+  borderRadius: 999,
+  border: "1px solid rgba(37,99,235,0.18)",
+  background: "rgba(255,255,255,0.62)",
+  color: "#1d4ed8",
+  fontSize: 12,
+  fontWeight: 800,
+  letterSpacing: "0.04em",
+  textTransform: "uppercase",
+};
+
+const brandImageFrame: React.CSSProperties = {
+  width: "100%",
+  maxWidth: 420,
+  padding: 26,
+  borderRadius: 28,
+  background: "linear-gradient(180deg, rgba(255,255,255,0.96) 0%, rgba(255,255,255,0.82) 100%)",
+  border: "1px solid rgba(255,255,255,0.85)",
+  boxShadow: "0 24px 50px rgba(37,99,235,0.12)",
+};
+
+const brandImage: React.CSSProperties = {
+  width: "100%",
+  maxWidth: 360,
+  objectFit: "contain",
+  display: "block",
+  margin: "0 auto",
+  filter: "drop-shadow(0 10px 24px rgba(11,95,255,0.14))",
+};
+
+const brandTextWrap: React.CSSProperties = {
+  display: "grid",
+  gap: 10,
+};
+
+const brandTitle: React.CSSProperties = {
+  fontSize: 42,
+  fontWeight: 800,
+  color: "#0f172a",
+  letterSpacing: "-0.03em",
+  lineHeight: 1.05,
+};
+
+const brandSubtitle: React.CSSProperties = {
+  fontSize: 17,
+  fontWeight: 700,
+  color: "#2563eb",
+};
+
+const brandDescription: React.CSSProperties = {
+  fontSize: 14,
+  lineHeight: 1.8,
+  color: "#334155",
+  maxWidth: 470,
+};
+
+const metricGrid: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "1fr 1fr 1fr",
+  gap: 12,
+  marginTop: 8,
+};
+
+const metricCard: React.CSSProperties = {
+  padding: "14px 12px",
+  borderRadius: 18,
+  background: "rgba(255,255,255,0.58)",
+  border: "1px solid rgba(255,255,255,0.72)",
+  boxShadow: "0 10px 20px rgba(148,163,184,0.10)",
+};
+
+const metricValue: React.CSSProperties = {
+  fontSize: 14,
+  fontWeight: 800,
+  color: "#0f172a",
+};
+
+const metricLabel: React.CSSProperties = {
+  fontSize: 12,
+  color: "#475569",
+  marginTop: 4,
+};
+
+const featureList: React.CSSProperties = {
+  marginTop: 2,
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 10,
+  justifyContent: "center",
+};
+
+const featurePill: React.CSSProperties = {
+  padding: "8px 12px",
+  borderRadius: 999,
+  border: "1px solid rgba(37,99,235,0.14)",
+  background: "rgba(255,255,255,0.56)",
+  fontSize: 12,
+  fontWeight: 700,
+  color: "#1e3a8a",
+};
+
+const formPanel: React.CSSProperties = {
+  background: "linear-gradient(180deg, rgba(255,255,255,0.92) 0%, rgba(255,255,255,0.86) 100%)",
   display: "flex",
   alignItems: "center",
   justifyContent: "center",
   padding: 48,
 };
 
-const brandingOverlay: React.CSSProperties = {
-  width: "100%",
-  maxWidth: 520,
-  display: "flex",
-  flexDirection: "column",
-  alignItems: "center",
-  textAlign: "center",
-};
-
-const brandImage: React.CSSProperties = {
-  width: "100%",
-  maxWidth: 430,
-  objectFit: "contain",
-  marginBottom: 18,
-  filter: "drop-shadow(0 8px 25px rgba(11,95,255,0.12))",
-};
-
-const brandTextWrap: React.CSSProperties = {
-  display: "grid",
-  gap: 8,
-};
-
-const brandTitle: React.CSSProperties = {
-  fontSize: 34,
-  fontWeight: 800,
-  color: "#0f172a",
-  letterSpacing: "-0.02em",
-};
-
-const brandSubtitle: React.CSSProperties = {
-  fontSize: 18,
-  fontWeight: 600,
-  color: "#1d4ed8",
-};
-
-const brandDescription: React.CSSProperties = {
-  fontSize: 14,
-  lineHeight: 1.7,
-  color: "#475569",
-  maxWidth: 460,
-  marginTop: 6,
-};
-
-const featureList: React.CSSProperties = {
-  marginTop: 12,
-  display: "grid",
-  gap: 6,
-  fontSize: 13,
-  color: "#334155",
-};
-
-const formPanel: React.CSSProperties = {
-  background: "#ffffff",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  padding: 40,
-};
-
 const formCard: React.CSSProperties = {
   width: "100%",
   maxWidth: 420,
+  padding: "6px 2px",
 };
 
 const eyebrow: React.CSSProperties = {
   fontSize: 13,
-  fontWeight: 700,
+  fontWeight: 800,
   color: "#0b5fff",
   marginBottom: 10,
+  letterSpacing: "0.02em",
+  textTransform: "uppercase",
 };
 
 const title: React.CSSProperties = {
-  fontSize: 34,
+  fontSize: 40,
   fontWeight: 800,
   color: "#0f172a",
-  letterSpacing: "-0.02em",
+  letterSpacing: "-0.03em",
 };
 
 const subtitle: React.CSSProperties = {
   fontSize: 14,
   color: "#64748b",
-  lineHeight: 1.6,
-  marginTop: 10,
-  marginBottom: 24,
+  lineHeight: 1.7,
+  marginTop: 12,
+  marginBottom: 28,
 };
 
 const errorBanner: React.CSSProperties = {
@@ -272,8 +382,8 @@ const errorBanner: React.CSSProperties = {
 
 const labelStyle: React.CSSProperties = {
   fontSize: 12,
-  fontWeight: 700,
-  color: "#475569",
+  fontWeight: 800,
+  color: "#334155",
   marginBottom: 6,
 };
 
@@ -296,31 +406,33 @@ const linkButton: React.CSSProperties = {
 
 const inputStyle: React.CSSProperties = {
   width: "100%",
-  minHeight: 46,
-  padding: "10px 12px",
-  borderRadius: 10,
-  border: "1px solid #dbe4ee",
-  background: "#fff",
+  minHeight: 50,
+  padding: "11px 14px",
+  borderRadius: 14,
+  border: "1px solid #d7e1ee",
+  background: "rgba(255,255,255,0.94)",
   fontSize: 14,
   color: "#0f172a",
   outline: "none",
   boxSizing: "border-box",
+  boxShadow: "0 6px 18px rgba(15,23,42,0.04)",
 };
 
 const primaryButton: React.CSSProperties = {
-  border: "1px solid #0b5fff",
-  background: "#0b5fff",
+  border: "1px solid #2563eb",
+  background: "linear-gradient(135deg, #2563eb 0%, #0b5fff 55%, #0284c7 100%)",
   color: "#fff",
-  borderRadius: 10,
-  padding: "12px 16px",
+  borderRadius: 14,
+  padding: "13px 16px",
   fontSize: 14,
-  fontWeight: 700,
+  fontWeight: 800,
   transition: "all 0.2s ease",
+  boxShadow: "0 14px 28px rgba(37,99,235,0.22)",
 };
 
 const footerNote: React.CSSProperties = {
-  marginTop: 18,
   fontSize: 12,
   color: "#94a3b8",
   textAlign: "center",
+  marginTop: 20,
 };

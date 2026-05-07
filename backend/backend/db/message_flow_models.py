@@ -29,7 +29,7 @@ class TradingPartnerMessageFlow(Base):
     source_message_type = Column(String, nullable=True)  # 850 / ORDERS / DESADV / INVOIC / etc
     source_message_version = Column(String, nullable=True)  # 4010 / 5010 / D97A / ORDERS05 / v1
 
-    target_erp = Column(String, nullable=False)  # SAP / ORACLE / D365 / NETSUITE / GENERIC
+    target_erp = Column(String, nullable=False)  # SAP / ORACLE / D365 / JDE / NETSUITE / GENERIC
     target_message_standard = Column(String, nullable=False)  # IDOC / API / XML / JSON / X12 / EDIFACT
     target_message_type = Column(String, nullable=False)  # ORDERS / salesOrderApi / orderXml
     target_message_version = Column(String, nullable=True)  # ORDERS03 / ORDERS05 / v1 / D97A

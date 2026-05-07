@@ -1,0 +1,78 @@
+{
+  "vendor": "Netherlands_B.V.",
+  "column_x_ranges": {
+    "line_no": {
+      "x_start": 0,
+      "x_end": 460,
+      "x_mid": 230.0
+    },
+    "delivery_date": {
+      "x_start": 0,
+      "x_end": 460,
+      "x_mid": 230.0
+    },
+    "material": {
+      "x_start": 0,
+      "x_end": 460,
+      "x_mid": 230.0
+    },
+    "description": {
+      "x_start": 0,
+      "x_end": 460,
+      "x_mid": 230.0
+    },
+    "quantity": {
+      "x_start": 0,
+      "x_end": 460,
+      "x_mid": 230.0
+    },
+    "uom": {
+      "x_start": 0,
+      "x_end": 460,
+      "x_mid": 230.0
+    },
+    "unit_price": {
+      "x_start": 0,
+      "x_end": 460,
+      "x_mid": 230.0
+    },
+    "amount": {
+      "x_start": 0,
+      "x_end": 460,
+      "x_mid": 230.0
+    }
+  },
+  "header_hints": {
+    "line_no": [
+      "date"
+    ],
+    "material": [
+      "date"
+    ],
+    "description": [
+      "date"
+    ],
+    "delivery_date": [
+      "date"
+    ],
+    "quantity": [
+      "date"
+    ],
+    "uom": [
+      "date"
+    ],
+    "unit_price": [
+      "date"
+    ],
+    "amount": [
+      "date"
+    ]
+  },
+  "layout_signatures": [
+    "Netherlands_B.V._P1_2_0"
+  ],
+  "preferred_page_regions": {
+    "table_page": 1
+  },
+  "last_updated": "2026-05-05 19:50:04.708776+00:00"
+}

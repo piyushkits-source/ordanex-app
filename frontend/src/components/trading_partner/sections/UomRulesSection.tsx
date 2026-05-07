@@ -144,10 +144,22 @@ function field(label: string, child: React.ReactNode) {
 
 const title: React.CSSProperties = { fontSize: 16, fontWeight: 800, color: "#0f172a", marginBottom: 8 };
 const help: React.CSSProperties = { fontSize: 12, color: "#64748b", marginBottom: 14 };
-const grid: React.CSSProperties = { display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 };
+const grid: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+  gap: 12,
+  alignItems: "start",
+};
 const row: React.CSSProperties = { display: "flex", gap: 10, marginTop: 14, marginBottom: 12 };
 const labelStyle: React.CSSProperties = { fontSize: 12, fontWeight: 700, color: "#475569", marginBottom: 6 };
-const input: React.CSSProperties = { width: "100%", minHeight: 38, padding: "8px 10px", borderRadius: 8, border: "1px solid #dbe4ee" };
+const input: React.CSSProperties = {
+  width: "100%",
+  minHeight: 38,
+  padding: "8px 10px",
+  borderRadius: 8,
+  border: "1px solid #dbe4ee",
+  boxSizing: "border-box",
+};
 const button: React.CSSProperties = { border: "1px solid #0b5fff", background: "#0b5fff", color: "#fff", borderRadius: 8, padding: "9px 14px", fontSize: 13, fontWeight: 700 };
 const table: React.CSSProperties = { width: "100%", borderCollapse: "collapse", marginTop: 8 };
 const th: React.CSSProperties = { textAlign: "left", padding: "10px 12px", background: "#f8fafc", borderBottom: "1px solid #e5e7eb" };

@@ -5,12 +5,14 @@ type AppScope = {
   clientName: string;
   verticalId: string;
   verticalName: string;
+  environment: string;
 };
 
 type AppScopeContextType = {
   scope: AppScope;
   setClientScope: (payload: { clientId: string; clientName?: string }) => void;
   setVerticalScope: (payload: { verticalId: string; verticalName?: string }) => void;
+  setEnvironmentScope: (environment: string) => void;
   clearScope: () => void;
 };
 
@@ -21,6 +23,7 @@ const defaultScope: AppScope = {
   clientName: "",
   verticalId: "",
   verticalName: "",
+  environment: "PROD",
 };
 
 const AppScopeContext = createContext<AppScopeContextType | undefined>(undefined);
@@ -38,6 +41,7 @@ export function AppScopeProvider({ children }: { children: React.ReactNode }) {
           clientName: parsed.clientName || "",
           verticalId: parsed.verticalId || "",
           verticalName: parsed.verticalName || "",
+          environment: parsed.environment || "PROD",
         });
       }
     } catch {
@@ -66,6 +70,12 @@ export function AppScopeProvider({ children }: { children: React.ReactNode }) {
           ...prev,
           verticalId,
           verticalName,
+        }));
+      },
+      setEnvironmentScope: (environment: string) => {
+        setScope((prev) => ({
+          ...prev,
+          environment: environment || "PROD",
         }));
       },
       clearScope: () => setScope(defaultScope),

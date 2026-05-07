@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 from dataclasses import dataclass, field
+import json
 from typing import Any
 
 from openpyxl import load_workbook
@@ -12,6 +13,39 @@ from openpyxl.worksheet.worksheet import Worksheet
 ERROR_FILL = PatternFill(start_color="FECACA", end_color="FECACA", fill_type="solid")
 HEADER_FILL = PatternFill(start_color="DBEAFE", end_color="DBEAFE", fill_type="solid")
 ERROR_FONT = Font(color="B91C1C", bold=True)
+FIELD_REQUIREMENT_COLUMNS = {
+    "req_document_number": "document_number",
+    "req_document_date": "document_date",
+    "req_document_type": "document_type",
+    "req_order_type": "order_type",
+    "req_customer_name": "customer_name",
+    "req_supplier_name": "supplier_name",
+    "req_bill_to_code": "bill_to_code",
+    "req_bill_to_name": "bill_to_name",
+    "req_currency_code": "currency_code",
+    "req_ship_to_code": "ship_to_code",
+    "req_ship_to_name": "ship_to_name",
+    "req_ship_to_address": "ship_to_address",
+    "req_header_details": "header_details",
+    "req_invoice_number": "invoice_number",
+    "req_invoice_date": "invoice_date",
+    "req_invoice_due_date": "invoice_due_date",
+    "req_invoice_total": "invoice_total",
+    "req_item_material_code": "items.*.material_code",
+    "req_item_mapped_product": "items.*.mapped_product",
+    "req_item_description": "items.*.description",
+    "req_item_line_details": "items.*.line_details",
+    "req_item_quantity": "items.*.quantity",
+    "req_item_customer_uom": "items.*.customer_uom",
+    "req_item_delivery_date": "items.*.delivery_date",
+    "req_item_delivery_time": "items.*.delivery_time",
+    "req_item_unit_price": "items.*.unit_price",
+    "req_item_amount": "items.*.amount",
+}
+VALID_REQUIREMENT_LEVELS = {"MANDATORY", "OPTIONAL", "CONDITIONAL"}
+VALID_TARGET_ERPS = {"SAP", "ORACLE", "D365", "JDE", "API"}
+VALID_INVOICE_PROFILE_TYPES = {"AP_INVOICE", "AR_INVOICE", "INVOICE"}
+VALID_BOOLEAN_VALUES = {"TRUE", "FALSE", "YES", "NO", "1", "0"}
 
 
 @dataclass
@@ -69,6 +103,48 @@ def _workbook_to_bytes(wb) -> bytes:
     wb.save(buf)
     buf.seek(0)
     return buf.read()
+
+
+def _parse_json_cell(value: Any, field_name: str) -> tuple[dict[str, Any] | None, str | None]:
+    if value in (None, ""):
+        return None, None
+    if isinstance(value, dict):
+        return value, None
+    raw = str(value).strip()
+    if not raw:
+        return None, None
+    try:
+        parsed = json.loads(raw)
+    except Exception:
+        return None, f"{field_name} must be valid JSON."
+    if not isinstance(parsed, dict):
+        return None, f"{field_name} must be a JSON object."
+    return parsed, None
+
+
+def _validate_requirement_json(payload: dict[str, Any], field_name: str) -> str | None:
+    requirements = payload.get("field_requirements")
+    if requirements is None:
+        return None
+    if not isinstance(requirements, dict):
+        return f"{field_name}.field_requirements must be a JSON object."
+    return None
+
+
+def _build_requirement_json_from_row(row_data: dict[str, Any]) -> tuple[dict[str, Any] | None, list[tuple[str, str]]]:
+    field_requirements: dict[str, Any] = {}
+    errors: list[tuple[str, str]] = []
+    for column_name, field_name in FIELD_REQUIREMENT_COLUMNS.items():
+        level = str(row_data.get(column_name) or "").strip().upper()
+        if not level:
+            continue
+        if level not in VALID_REQUIREMENT_LEVELS:
+            errors.append((column_name, f"{column_name} must be MANDATORY, OPTIONAL, or CONDITIONAL."))
+            continue
+        field_requirements[field_name] = level
+    if not field_requirements:
+        return None, errors
+    return {"field_requirements": field_requirements}, errors
 
 
 def validate_uom_workbook(contents: bytes) -> ValidationResult:
@@ -265,6 +341,51 @@ def validate_bulk_onboarding_workbook(contents: bytes) -> ValidationResult:
         if connection_method == "EMAIL" and not email:
             row_errors.append(("email", "email is required when connection_method is EMAIL."))
 
+        target_erp = str(row_data.get("target_erp") or "").strip().upper()
+        if target_erp and target_erp not in VALID_TARGET_ERPS:
+            row_errors.append(("target_erp", "Invalid target_erp."))
+
+        invoice_profile_type = str(row_data.get("invoice_profile_type") or "").strip().upper()
+        if invoice_profile_type and invoice_profile_type not in VALID_INVOICE_PROFILE_TYPES:
+            row_errors.append(("invoice_profile_type", "invoice_profile_type must be AP_INVOICE, AR_INVOICE, or INVOICE."))
+
+        customization_required_raw = str(row_data.get("customization_required") or "").strip().upper()
+        if customization_required_raw and customization_required_raw not in VALID_BOOLEAN_VALUES:
+            row_errors.append(("customization_required", "customization_required must be TRUE or FALSE."))
+
+        row_level_validation_json, row_level_validation_errors = _build_requirement_json_from_row(row_data)
+        row_errors.extend(row_level_validation_errors)
+
+        mapping_validation_json, mapping_validation_error = _parse_json_cell(
+            row_data.get("mapping_validation_json"),
+            "mapping_validation_json",
+        )
+        if mapping_validation_error:
+            row_errors.append(("mapping_validation_json", mapping_validation_error))
+        elif mapping_validation_json:
+            validation_error = _validate_requirement_json(
+                mapping_validation_json,
+                "mapping_validation_json",
+            )
+            if validation_error:
+                row_errors.append(("mapping_validation_json", validation_error))
+
+        business_rule_validation_json, business_rule_validation_error = _parse_json_cell(
+            row_data.get("business_rule_validation_json"),
+            "business_rule_validation_json",
+        )
+        if business_rule_validation_error:
+            row_errors.append(("business_rule_validation_json", business_rule_validation_error))
+        elif business_rule_validation_json:
+            validation_error = _validate_requirement_json(
+                business_rule_validation_json,
+                "business_rule_validation_json",
+            )
+            if validation_error:
+                row_errors.append(("business_rule_validation_json", validation_error))
+        elif row_level_validation_json:
+            business_rule_validation_json = row_level_validation_json
+
         if row_errors:
             for column_name, message in row_errors:
                 issues.append(ValidationIssue(row_num, column_name, message))
@@ -287,6 +408,36 @@ def validate_bulk_onboarding_workbook(contents: bytes) -> ValidationResult:
                 "sftp_path": str(row_data.get("sftp_path")).strip() if row_data.get("sftp_path") else None,
                 "as2_id": str(row_data.get("as2_id")).strip() if row_data.get("as2_id") else None,
                 "api_reference": str(row_data.get("api_reference")).strip() if row_data.get("api_reference") else None,
+                "target_defaults_json": {
+                    key: str(row_data.get(key)).strip()
+                    for key in ("header_text_id", "line_text_id")
+                    if row_data.get(key) not in (None, "")
+                },
+                "target_profile_json": {
+                    key: str(row_data.get(key)).strip()
+                    for key in (
+                        "target_message_family",
+                        "target_erp",
+                        "target_standard",
+                        "target_message_type",
+                        "target_message_version",
+                        "transaction_id_source",
+                        "invoice_profile_type",
+                        "invoice_number_source",
+                        "invoice_date_source",
+                        "invoice_total_source",
+                    )
+                    if row_data.get(key) not in (None, "")
+                },
+                "customization_json": {
+                    "required": customization_required_raw in {"TRUE", "YES", "1"},
+                    "notes": str(row_data.get("customization_notes")).strip() if row_data.get("customization_notes") else "",
+                }
+                if customization_required_raw or row_data.get("customization_notes") not in (None, "")
+                else {},
+                "mapping_validation_json": mapping_validation_json,
+                "business_rule_validation_json": business_rule_validation_json,
+                "row_level_field_requirements": row_level_validation_json,
                 "notes": str(row_data.get("notes")).strip() if row_data.get("notes") else None,
             }
         )

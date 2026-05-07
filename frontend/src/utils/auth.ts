@@ -1,3 +1,5 @@
+import { getDefaultRouteForAuth } from "./access";
+
 export type AuthUser = {
   access_token: string;
   token_type: string;
@@ -5,9 +7,13 @@ export type AuthUser = {
   email: string;
   role: string;
   client_id?: string | null;
+  environment?: string | null;
+  subscription_type?: string | null;
+  client_name?: string | null;
 };
 
 const AUTH_STORAGE_KEY = "ordanex_auth";
+let bootLogoutApplied = false;
 
 export function saveAuth(auth: AuthUser) {
   localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(auth));
@@ -33,12 +39,51 @@ export function getCurrentRole(): string | null {
   return getAuth()?.role || null;
 }
 
+export function getCurrentSubscriptionType(): string | null {
+  return getAuth()?.subscription_type || null;
+}
+
 export function isAuthenticated(): boolean {
   return !!getAccessToken();
 }
 
 export function clearAuth() {
   localStorage.removeItem(AUTH_STORAGE_KEY);
+}
+
+export function clearAuthOnAppBoot() {
+  if (bootLogoutApplied) return;
+  bootLogoutApplied = true;
+  clearAuth();
+}
+
+export function redirectToLogin(nextPath?: string | null) {
+  clearAuth();
+  const currentPath =
+    nextPath ||
+    (typeof window !== "undefined"
+      ? window.location.pathname + window.location.search
+      : "/");
+  const redirect = `/login?next=${encodeURIComponent(currentPath)}`;
+  if (typeof window !== "undefined") {
+    window.location.replace(redirect);
+  }
+}
+
+export async function verifyCurrentSession(): Promise<boolean> {
+  const token = getAccessToken();
+  if (!token) return false;
+
+  try {
+    const response = await fetch("/auth/me", {
+      method: "GET",
+      headers: getAuthHeaders(),
+      cache: "no-store",
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
 }
 
 export function getAuthHeaders(extra?: HeadersInit): HeadersInit {
@@ -51,7 +96,12 @@ export function getAuthHeaders(extra?: HeadersInit): HeadersInit {
 }
 
 export function getPostLoginPath(role?: string | null) {
-  if (role === "super_admin") return "/monitoring";
-  if (role === "client_admin") return "/client-config";
-  return "/monitoring";
+  const auth = getAuth();
+  const merged = auth
+    ? { ...auth, role: role ?? auth.role }
+      : role
+      ? ({ role } as AuthUser)
+      : null;
+  if (!merged) return "/monitoring";
+  return getDefaultRouteForAuth(merged);
 }

@@ -5,10 +5,13 @@ import TradingPartnerPage from "./pages/TradingPartnerPage";
 import TradingPartnerWorkspacePage from "./pages/TradingPartnerWorkspacePage";
 import LoginPage from "./pages/LoginPage";
 import UsersPage from "./pages/UsersPage";
+import ReportsPage from "./pages/ReportsPage";
+import AnalyticsPage from "./pages/AnalyticsPage";
 import ProtectedRoute from "./components/auth/ProtectedRoute";
 import PublicRoute from "./components/auth/PublicRoute";
+import AccessRoute from "./components/auth/AccessRoute";
 import AppLayout from "./app/layout/AppLayout";
-import { getAuth, getPostLoginPath } from "./utils/auth";
+import { clearAuthOnAppBoot, getAuth, getPostLoginPath } from "./utils/auth";
 
 function Placeholder({ title }: { title: string }) {
   return (
@@ -34,6 +37,8 @@ function HomeRedirect() {
 }
 
 export default function App() {
+  clearAuthOnAppBoot();
+
   return (
     <Routes>
       <Route path="/" element={<HomeRedirect />} />
@@ -54,25 +59,17 @@ export default function App() {
           </ProtectedRoute>
         }
       >
-        <Route path="/monitoring" element={<MessageMonitorPage />} />
-        <Route path="/client-config" element={<ClientConfigWorkspacePage />} />
-
-        {/* Trading Partners: list view then workspace detail */}
-        <Route path="/trading-partners" element={<TradingPartnerPage />} />
-        <Route path="/trading-partners/:partnerId/*" element={<TradingPartnerWorkspacePage />} />
-
-        {/* Legacy URL redirect */}
-        <Route
-          path="/Trading-Partner/:partnerId/*"
-          element={<Navigate to="/trading-partners" replace />}
-        />
-
-        <Route path="/users" element={<UsersPage />} />
+        <Route path="/monitoring" element={<AccessRoute moduleKey="monitoring"><MessageMonitorPage /></AccessRoute>} />
+        <Route path="/client-config" element={<AccessRoute moduleKey="client_config"><ClientConfigWorkspacePage /></AccessRoute>} />
+        <Route path="/trading-partners" element={<AccessRoute moduleKey="trading_partners"><TradingPartnerPage /></AccessRoute>} />
+        <Route path="/trading-partners/:partnerId/*" element={<AccessRoute moduleKey="trading_partners"><TradingPartnerWorkspacePage /></AccessRoute>} />
+        <Route path="/Trading-Partner/:partnerId/*" element={<Navigate to="/trading-partners" replace />} />
+        <Route path="/users" element={<AccessRoute moduleKey="users"><UsersPage /></AccessRoute>} />
         <Route path="/user-admin" element={<Navigate to="/users" replace />} />
-        <Route path="/connections" element={<Placeholder title="Connections" />} />
-        <Route path="/business-rules" element={<Placeholder title="Business Rules" />} />
-        <Route path="/reports" element={<Placeholder title="Reports" />} />
-        <Route path="/analytics" element={<Placeholder title="Analytics" />} />
+        <Route path="/connections" element={<AccessRoute moduleKey="connections"><Placeholder title="Connections" /></AccessRoute>} />
+        <Route path="/business-rules" element={<AccessRoute moduleKey="business_rules"><Placeholder title="Business Rules" /></AccessRoute>} />
+        <Route path="/reports" element={<AccessRoute moduleKey="reports"><ReportsPage /></AccessRoute>} />
+        <Route path="/analytics" element={<AccessRoute moduleKey="analytics"><AnalyticsPage /></AccessRoute>} />
       </Route>
 
       <Route path="*" element={<Navigate to="/" replace />} />

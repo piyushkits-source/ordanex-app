@@ -16,7 +16,7 @@ from sqlalchemy import (
 )
 
 from sqlalchemy.dialects.postgresql import JSONB, UUID
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship, synonym
 from backend.db.database import Base
 from datetime import datetime
 
@@ -98,6 +98,32 @@ class OutboundMessage(Base):
     sent_at = Column(DateTime)
     acknowledged_at = Column(DateTime)
 
+class APInvoiceReceiptSnapshot(Base):
+    __tablename__ = "ap_invoice_receipt_snapshots"
+
+    receipt_snapshot_id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    client_id = Column(String(100), ForeignKey("clients.client_id"), nullable=False, index=True)
+    partner_id = Column(UUID(as_uuid=True), ForeignKey("trading_partners.partner_id"), nullable=True, index=True)
+
+    reference_po_number = Column(String(255), nullable=True, index=True)
+    invoice_number = Column(String(255), nullable=True, index=True)
+    receipt_number = Column(String(255), nullable=True, index=True)
+    source_system = Column(String(100), nullable=True)
+    source_reference = Column(String(255), nullable=True)
+
+    receipt_date = Column(Date, nullable=True)
+    currency = Column(String(10), nullable=True)
+    receipt_subtotal = Column(Numeric(18, 4), nullable=True)
+    tax_total = Column(Numeric(18, 4), nullable=True)
+    freight_total = Column(Numeric(18, 4), nullable=True)
+    receipt_total = Column(Numeric(18, 4), nullable=True)
+    line_snapshot_json = Column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
+
+    is_active = Column(Boolean, nullable=False, default=True)
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime, nullable=False, server_default=func.now())
+    updated_at = Column(DateTime, nullable=False, server_default=func.now(), onupdate=func.now())
+
 class FieldBoxTemplate(Base):
     __tablename__ = "field_box_templates"
 
@@ -136,12 +162,13 @@ class User(Base):
     user_id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
     client_id = Column(String(100), ForeignKey("clients.client_id", ondelete="CASCADE"), nullable=True)
     tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.tenant_id"))
+    environment = Column(String(20), nullable=False, default="staging", index=True)
 
     display_name = Column(String(255))
     failed_login_count = Column(Integer, default=0)
     is_locked = Column(Boolean, default=False)
     mfa_enabled = Column(Boolean, default=False)
-    email = Column(String(255), unique=True, nullable=False, index=True)
+    email = Column(String(255), nullable=False, index=True)
     password_hash = Column(Text, nullable=False)
     role = Column(String(50), nullable=False)
     is_active = Column(Boolean, nullable=False, default=True)
@@ -396,6 +423,7 @@ class MappingProfile(Base):
 
     mapping_profile_id = Column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
     client_id = Column(String(100), nullable=False, index=True)
+    partner_id = Column(UUID(as_uuid=True), nullable=True, index=True)
     profile_name = Column(String(255), nullable=False)
     sold_to = Column(String(100), nullable=True, index=True)
     ship_to = Column(String(255), nullable=True, index=True)
@@ -422,21 +450,27 @@ class IdocNumberRange(Base):
 class VendorLayoutLearning(Base):
     __tablename__ = "vendor_layout_learning"
 
-    vendor_learning_id = Column(Integer, primary_key=True, index=True)
+    learning_id = Column(Integer, primary_key=True, index=True)
+    vendor_learning_id = synonym("learning_id")
     client_id = Column(String, index=True, nullable=False)
     supplier_name = Column(String, index=True, nullable=True)
 
     fingerprint_hash = Column(String, index=True, nullable=True)
     fingerprint_json = Column(JSON, nullable=False, default={})
+    layout_fingerprint_json = synonym("fingerprint_json")
 
+    mapping_profile_name = Column(String, nullable=False, default="")
     mapping_profile_id = Column(String, nullable=True)
     learned_mapping_json = Column(JSON, nullable=False, default={})
 
+    version = Column(Integer, nullable=False, default=1)
+    confidence = Column(Numeric(6, 3), nullable=False, default=0.99)
     usage_count = Column(Integer, nullable=False, default=0)
     approved_count = Column(Integer, nullable=False, default=1)
     last_used_at = Column(DateTime, nullable=True)
 
     approved_by = Column(String, nullable=True)
+    is_active = Column(Boolean, nullable=False, default=True)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 

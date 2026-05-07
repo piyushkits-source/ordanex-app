@@ -37,7 +37,11 @@ export interface LineItem {
   uom?: string | null;
   unit_price?: string | number | null;
   amount?: string | number | null;
+  allowance_discount_surcharge?: string | number | null;
+  tax_amount?: string | number | null;
+  line_total_amount?: string | number | null;
   delivery_date?: string | null;
+  is_deleted?: boolean;
 }
 
 export interface MonitoringRow {
@@ -46,12 +50,24 @@ export interface MonitoringRow {
   client_id: string;
   po_number?: string | null;
   po_date?: string | null;
+  document_number?: string | null;
+  invoice_number?: string | null;
+  invoice_date?: string | null;
+  billing_document_number?: string | null;
+  billing_date?: string | null;
+  reference_po_number?: string | null;
+  tax_id?: string | null;
+  invoice_total?: string | null;
+  tax_total?: string | null;
   docnum?: string | null;
   supplier_name?: string | null;
   status?: string | null;
   sender?: string | null;
   receiver?: string | null;
   direction?: string | null;
+  message_type?: string | null;
+  message_family?: string | null;
+  document_type?: string | null;
   environment?: string | null;
   source_type?: string | null;
   created_at?: string | null;
@@ -66,6 +82,18 @@ export interface MonitoringRow {
   sold_to_partner?: PartnerResolution | null;
   ship_to_partner?: PartnerResolution | null;
   delivery_partner?: PartnerResolution | null;
+  required_fields?: string[];
+  missing_required_fields?: string[];
+  processing_block_reason?: string | null;
+  auto_process_ready?: boolean | null;
+  review_status?: string | null;
+  needs_review?: boolean | null;
+  customization_required?: boolean | null;
+  customization_notes?: string | null;
+  split_key?: string | null;
+  split_sequence?: number | null;
+  parent_po_id?: string | null;
+  source_locator_json?: Record<string, unknown> | null;
 }
 
 export interface ActivityLog {
@@ -87,3 +115,4 @@ export interface ProcessingStep {
   timestamp?: string | null;
   details?: string | null;
 }
+

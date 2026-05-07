@@ -303,6 +303,35 @@ def extract_header_fields(text: str, default_currency: str = "") -> dict:
     lines = [l.strip() for l in str(text or "").splitlines() if l.strip()]
     top_text = "\n".join(lines[:25])
 
+    def _line_after(label_patterns: list[str]) -> str | None:
+        for idx, line in enumerate(lines[:25]):
+            lower = line.lower()
+            if any(pat in lower for pat in label_patterns):
+                for nxt in lines[idx + 1 : min(len(lines), idx + 4)]:
+                    nxt_clean = str(nxt or "").strip()
+                    if nxt_clean and not any(stop in nxt_clean.lower() for stop in ("vat seq", "invoice", "page", "date", "currency")):
+                        return nxt_clean
+        return None
+
+    invoice_markers = (
+        "invoice",
+        "billing invoice",
+        "tax invoice",
+        "vat invoice",
+        "commercial invoice",
+    )
+    invoice_number_match = re.search(
+        r"\b(?:invoice|tax invoice|commercial invoice)\s*(?:no\.?|number|#|:)?\s*([A-Z0-9\-_\/]+)",
+        top_text,
+        re.I,
+    )
+    if invoice_number_match:
+        header["invoice_number"] = invoice_number_match.group(1).strip()
+    elif any(marker in top_text.lower() for marker in invoice_markers):
+        alt_match = re.search(r"\binvoice\s+([A-Z0-9\-_\/]+)\b", top_text, re.I)
+        if alt_match:
+            header["invoice_number"] = alt_match.group(1).strip()
+
     strong = re.findall(r"\b[A-Z]{1,6}-\d{3,20}\b", top_text, re.I)
     if strong:
         info = validate_po_number(strong[0])
@@ -327,6 +356,27 @@ def extract_header_fields(text: str, default_currency: str = "") -> dict:
     date_match = re.search(r"\b(\d{2}/\d{2}/\d{4})\b", text)
     if date_match:
         header["po_date"] = date_match.group(1)
+
+    invoice_date_match = re.search(
+        r"\b(?:invoice\s+date|date)\s*[:\-]?\s*(\d{2}[A-Z]{3}\d{4}|\d{2}/\d{2}/\d{4}|\d{4}-\d{2}-\d{2})\b",
+        text,
+        re.I,
+    )
+    if invoice_date_match:
+        header["invoice_date"] = invoice_date_match.group(1)
+
+    reference_po_value = _line_after([
+        "customer order number",
+        "our reference",
+        "reference po number",
+        "po number",
+        "purchase order number",
+        "order number",
+    ])
+    if reference_po_value:
+        first_token = str(reference_po_value).split()[0].strip()
+        if first_token and re.search(r"[A-Z0-9]", first_token):
+            header["reference_po_number"] = first_token
 
     header["currency"] = extract_currency(text, default_currency=default_currency)
     header["supplier"] = detect_vendor_name(text)
@@ -1226,6 +1276,13 @@ def parse_pdf_ai_structured(file, vendor="default", default_currency: str = ""):
             header[k] = v
 
     detected_vendor = header.get("supplier") or vendor or detect_vendor_name(text)
+    text_lower = text.lower()
+    invoice_like = bool(
+        header.get("invoice_number")
+        or header.get("invoice_date")
+        or header.get("reference_po_number")
+        or any(marker in text_lower for marker in (" invoice ", "\ninvoice", "tax invoice", "commercial invoice"))
+    )
 
     # 1) Layout-first extraction
     layout_result = auto_learn_layout_engine(file_bytes, detected_vendor)
@@ -1269,6 +1326,13 @@ def parse_pdf_ai_structured(file, vendor="default", default_currency: str = ""):
     header["po_validation"] = po_info
     if po_info["is_valid"]:
         header["po_number"] = po_info["value"]
+
+    if invoice_like:
+        header["document_type"] = "INVOICE"
+        if not header.get("reference_po_number") and header.get("po_number"):
+            header["reference_po_number"] = header.get("po_number")
+    else:
+        header["document_type"] = header.get("document_type") or "PO"
 
     if not header.get("currency"):
         header["currency"] = (default_currency or "").upper()

@@ -16,7 +16,7 @@ export default function PremiumExpandedPanel({ row, selectedField, onSelectField
     <div style={{ display: "grid", gridTemplateColumns: "1.05fr 0.95fr", gap: 16 }}>
       <div style={{ ...glassCard, padding: 16 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-          <h3 style={sectionTitle}>PO Viewer</h3>
+          <h3 style={sectionTitle}>Document Viewer</h3>
           <div style={{ display: "flex", gap: 8 }}>
             <button style={iconButton} title="Download Original"><FaDownload /></button>
             <button style={iconButton} title="Download Transformed XML"><FaDownload /></button>
@@ -27,10 +27,10 @@ export default function PremiumExpandedPanel({ row, selectedField, onSelectField
 
         <div style={{ borderRadius: 18, overflow: "hidden" }}>
           <DocumentViewer
-            fileUrl={row.fileUrl}
-            fileName={row.fileName}
-            mimeType={row.mimeType}
-            rawText={row.rawText}
+            fileUrl={row.fileUrl || (row as any).file_url}
+            fileName={row.fileName || (row as any).file_name}
+            mimeType={row.mimeType || (row as any).mime_type}
+            rawText={row.rawText || (row as any).raw_text}
           />
         </div>
       </div>

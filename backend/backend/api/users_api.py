@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
 
+from backend.core.environment import current_environment
 from backend.db.database import get_db
 from backend.db import models
 from backend.core.security import hash_password
@@ -11,6 +12,7 @@ router = APIRouter(prefix="/users", tags=["users"])
 
 class CreateUserRequest(BaseModel):
     client_id: str | None = None
+    environment: str | None = None
     email: EmailStr
     password: str
     role: str
@@ -31,9 +33,11 @@ def list_users(
     if current_user.role != "super_admin":
         client_id = current_user.client_id
 
+    env = current_environment()
     q = db.query(models.User)
     if client_id:
         q = q.filter(models.User.client_id == client_id)
+    q = q.filter((models.User.environment == env) | (models.User.environment.is_(None)))
     rows = q.order_by(models.User.created_at.desc()).all()
 
     return [
@@ -41,6 +45,7 @@ def list_users(
             "user_id": str(u.user_id),
             "email": u.email,
             "client_id": u.client_id,
+            "environment": getattr(u, "environment", None),
             "role": u.role,
             "is_active": bool(u.is_active),
             "created_at": u.created_at.isoformat() if u.created_at else None,
@@ -59,12 +64,19 @@ def create_user(
     if current_user.role != "super_admin":
         enforce_client_scope(current_user, payload.client_id)
 
-    existing = db.query(models.User).filter(models.User.email == payload.email).first()
+    env = (payload.environment or current_environment()).strip().lower()
+    existing = (
+        db.query(models.User)
+        .filter(models.User.email == payload.email)
+        .filter((models.User.environment == env) | (models.User.environment.is_(None)))
+        .first()
+    )
     if existing:
         raise HTTPException(status_code=400, detail="User already exists")
 
     user = models.User(
         client_id=payload.client_id,
+        environment=env,
         email=payload.email,
         password_hash=hash_password(payload.password),
         role=payload.role,
@@ -136,4 +148,5 @@ def me(current_user: UserContext = Depends(get_current_user)):
         "email": current_user.email,
         "role": current_user.role,
         "client_id": current_user.client_id,
+        "environment": current_user.environment,
     }

@@ -81,7 +81,7 @@ export default function BoundingBoxOverlay({
       return;
     }
     const next = [
-      ...boxes.filter((b) => !(b.page === page && andEqualsField(b.field, selectedField))),
+      ...boxes.filter((b) => !(b.page === page && equalsField(b.field, selectedField))),
       {
         field: selectedField,
         page,
@@ -148,6 +148,6 @@ export default function BoundingBoxOverlay({
   );
 }
 
-function && andEqualsField(left: string, right: string) {
+function equalsField(left: string, right: string) {
   return left === right;
 }

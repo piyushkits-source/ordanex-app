@@ -22,6 +22,22 @@ export default function DocumentViewer({ fileUrl, rawText, mimeType, fileName }:
       />
     );
   }
+  if (fileUrl) {
+    return (
+      <iframe
+        src={fileUrl}
+        title={fileName || "Document Preview"}
+        style={{
+          width: "100%",
+          minHeight: 620,
+          border: "1px solid #dbe4ee",
+          borderRadius: 12,
+          background: "#fff",
+        }}
+      />
+    );
+  }
+
   return (
     <pre
       style={{

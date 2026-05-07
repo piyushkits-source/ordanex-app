@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { apiFetch, parseApiError } from "utils/api";
 import { TradingPartner } from "types/tradingPartner";
 
 const API_BASE = "/trading-partners";
@@ -17,13 +18,12 @@ export default function BulkUploadSection({
     try {
       setBusy(true);
 
-      const res = await fetch(
-        `${API_BASE}/${partner.partner_id}/bulk-onboarding/template`,
-        { method: "GET" }
-      );
+      const res = await apiFetch(`${API_BASE}/${partner.partner_id}/bulk-onboarding/template`, {
+        method: "GET",
+      });
 
       if (!res.ok) {
-        throw new Error(await res.text());
+        throw new Error(await parseApiError(res));
       }
 
       const blob = await res.blob();
@@ -52,19 +52,16 @@ export default function BulkUploadSection({
       const formData = new FormData();
       formData.append("file", selectedFile);
 
-      const res = await fetch(
-        `${API_BASE}/${partner.partner_id}/bulk-onboarding/upload`,
-        {
-          method: "POST",
-          body: formData,
-        }
-      );
+      const res = await apiFetch(`${API_BASE}/${partner.partner_id}/bulk-onboarding/upload`, {
+        method: "POST",
+        body: formData,
+      });
 
       const contentType = res.headers.get("content-type") || "";
       const uploadStatus = res.headers.get("X-Upload-Status") || "";
 
       if (!res.ok) {
-        throw new Error(await res.text());
+        throw new Error(await parseApiError(res));
       }
 
       if (
@@ -103,7 +100,10 @@ export default function BulkUploadSection({
       <div style={title}>Bulk Onboarding</div>
       <div style={subtitle}>
         Download the onboarding template, fill partner onboarding rows, and upload
-        it back for validation and processing.
+        it back for validation and processing. The template now supports direct
+        `req_*` field columns with `MANDATORY / OPTIONAL / CONDITIONAL` dropdowns,
+        plus invoice-friendly AP / AR profile fields and optional JSON override
+        columns for advanced validation.
       </div>
 
       <div style={card}>

@@ -1,0 +1,108 @@
+{
+  "vendor": "Bay Building Supplies Inc.",
+  "column_x_ranges": {
+    "line_no": {
+      "x_start": 20,
+      "x_end": 560,
+      "x_mid": 290.0
+    },
+    "description": {
+      "x_start": 20,
+      "x_end": 560,
+      "x_mid": 290.0
+    },
+    "quantity": {
+      "x_start": 20,
+      "x_end": 560,
+      "x_mid": 290.0
+    },
+    "uom": {
+      "x_start": 20,
+      "x_end": 560,
+      "x_mid": 290.0
+    },
+    "unit_price": {
+      "x_start": 20,
+      "x_end": 560,
+      "x_mid": 290.0
+    },
+    "amount": {
+      "x_start": 20,
+      "x_end": 560,
+      "x_mid": 290.0
+    }
+  },
+  "header_hints": {
+    "line_no": [
+      "item",
+      "description",
+      "qty",
+      "unit",
+      "price",
+      "amount"
+    ],
+    "material": [
+      "item",
+      "description",
+      "qty",
+      "unit",
+      "price",
+      "amount"
+    ],
+    "description": [
+      "item",
+      "description",
+      "qty",
+      "unit",
+      "price",
+      "amount"
+    ],
+    "delivery_date": [
+      "item",
+      "description",
+      "qty",
+      "unit",
+      "price",
+      "amount"
+    ],
+    "quantity": [
+      "item",
+      "description",
+      "qty",
+      "unit",
+      "price",
+      "amount"
+    ],
+    "uom": [
+      "item",
+      "description",
+      "qty",
+      "unit",
+      "price",
+      "amount"
+    ],
+    "unit_price": [
+      "item",
+      "description",
+      "qty",
+      "unit",
+      "price",
+      "amount"
+    ],
+    "amount": [
+      "item",
+      "description",
+      "qty",
+      "unit",
+      "price",
+      "amount"
+    ]
+  },
+  "layout_signatures": [
+    "Bay Building Supplies Inc._P1_1_0"
+  ],
+  "preferred_page_regions": {
+    "table_page": 1
+  },
+  "last_updated": "2026-04-24 05:34:20.265414+00:00"
+}

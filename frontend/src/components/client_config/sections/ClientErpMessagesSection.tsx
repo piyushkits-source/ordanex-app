@@ -61,7 +61,7 @@ export default function ClientErpMessagesSection({ client, selectedVerticalId, o
         <div style={scopePill}>{selectedVerticalId ? "Vertical-scoped" : "Client-scoped"}</div>
       </div>
       <div style={grid3}>
-        {field("ERP", <select value={form.erp_name} onChange={(e) => setForm({ ...form, erp_name: e.target.value })} style={inputStyle}><option value="SAP">SAP</option><option value="D365">D365</option><option value="ORACLE">ORACLE</option><option value="CUSTOM">CUSTOM</option></select>)}
+        {field("ERP", <select value={form.erp_name} onChange={(e) => setForm({ ...form, erp_name: e.target.value })} style={inputStyle}><option value="SAP">SAP</option><option value="D365">D365</option><option value="ORACLE">ORACLE</option><option value="JDE">JDE</option><option value="CUSTOM">CUSTOM</option></select>)}
         {field("Message Type", <input value={form.message_type} onChange={(e) => setForm({ ...form, message_type: e.target.value })} style={inputStyle} placeholder="ORDERS / DELFOR / 850 / JSON_ORDERS" />)}
         {field("Message Version", <input value={form.message_version} onChange={(e) => setForm({ ...form, message_version: e.target.value })} style={inputStyle} placeholder="ORDERS05 / D97A / 004010" />)}
         {field("Format", <select value={form.format_type} onChange={(e) => setForm({ ...form, format_type: e.target.value })} style={inputStyle}><option value="IDOC">IDOC</option><option value="EDI">EDI</option><option value="XML">XML</option><option value="JSON">JSON</option><option value="CSV">CSV</option></select>)}

@@ -22,6 +22,7 @@ import AuditSection from "components/trading_partner/sections/AuditSection";
 import MessageFlowsSection from "components/trading_partner/sections/MessageFlowsSection";
 import TradingPartnerSectionMenu from "components/trading_partner/TradingPartnerSectionMenu";
 import ParserProfilesSection from "components/trading_partner/sections/ParserProfilesSection";
+import PromotionSection from "components/trading_partner/sections/PromotionSection";
 
 const API_BASE = "/trading-partners";
 
@@ -40,7 +41,8 @@ type SectionKey =
   | "notifications"
   | "bulk"
   | "ai"
-  | "audit";
+  | "audit"
+  | "promotion";
 
 const DEFAULT_SECTION: SectionKey = "profile";
 
@@ -63,6 +65,7 @@ function getActiveSection(pathname: string): SectionKey {
     "notifications",
     "bulk",
     "ai",
+    "promotion",
     "audit",
   ];
 
@@ -70,7 +73,8 @@ function getActiveSection(pathname: string): SectionKey {
 }
 
 export default function TradingPartnerWorkspacePage() {
-  const { scope } = useAppScope();
+  const { scope, setEnvironmentScope } = useAppScope();
+  const isProductionSelected = String(scope.environment || "PROD").toUpperCase() === "PROD";
   const navigate = useNavigate();
   const location = useLocation();
   const { partnerId = "" } = useParams();
@@ -196,6 +200,9 @@ export default function TradingPartnerWorkspacePage() {
       case "audit":
         return <AuditSection partner={selectedPartner} onBanner={setBanner} />;
 
+      case "promotion":
+        return <PromotionSection partner={selectedPartner} onBanner={setBanner} />;
+
       default:
         return <ProfileSection partner={selectedPartner} onBanner={setBanner} />;
     }
@@ -225,12 +232,27 @@ export default function TradingPartnerWorkspacePage() {
       <div style={contextBar}>
         <div style={contextChip}>Client: {scope.clientName || scope.clientId}</div>
         <div style={contextChip}>Vertical: {scope.verticalName || scope.verticalId}</div>
+        <div style={contextChip}>{isProductionSelected ? "Environment: Production" : "Environment: Staging"}</div>
         {selectedPartner ? (
           <div style={contextChipMuted}>
             Partner: {selectedPartner.partner_name} ({selectedPartner.partner_code})
           </div>
         ) : null}
+        <select
+          value={scope.environment || "PROD"}
+          onChange={(e) => setEnvironmentScope(e.target.value)}
+          style={envSelect}
+        >
+          <option value="PROD">Production</option>
+          <option value="STAGING">Staging</option>
+        </select>
       </div>
+
+      {isProductionSelected ? (
+        <div style={productionBanner}>
+          Production is read-only for trading partner configuration. Switch the active environment to Staging to create, edit, or update partner setup.
+        </div>
+      ) : null}
 
       <div style={layout}>
         <div style={leftPanel}>
@@ -361,6 +383,7 @@ const bannerStyle: React.CSSProperties = {
   fontSize: 13,
   fontWeight: 600,
 };
+const productionBanner: React.CSSProperties = { marginBottom: 14, border: "1px solid #fecaca", borderRadius: 10, padding: "10px 12px", fontSize: 13, fontWeight: 600, color: "#b91c1c", background: "#fef2f2" };
 
 const contextBar: React.CSSProperties = {
   display: "flex",
@@ -389,3 +412,4 @@ const contextChipMuted: React.CSSProperties = {
   fontSize: 12,
   fontWeight: 700,
 };
+const envSelect: React.CSSProperties = { minHeight: 34, borderRadius: 999, border: "1px solid #dbe4ee", background: "#fff", color: "#0f172a", padding: "6px 12px", fontSize: 12, fontWeight: 700 };

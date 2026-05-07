@@ -1,0 +1,118 @@
+{
+  "vendor": "1617879_0_1_OF_1",
+  "column_x_ranges": {
+    "line_no": {
+      "x_start": 20,
+      "x_end": 560,
+      "x_mid": 290.0
+    },
+    "material": {
+      "x_start": 20,
+      "x_end": 560,
+      "x_mid": 290.0
+    },
+    "description": {
+      "x_start": 20,
+      "x_end": 560,
+      "x_mid": 290.0
+    },
+    "delivery_date": {
+      "x_start": 20,
+      "x_end": 560,
+      "x_mid": 290.0
+    },
+    "quantity": {
+      "x_start": 20,
+      "x_end": 560,
+      "x_mid": 290.0
+    },
+    "uom": {
+      "x_start": 20,
+      "x_end": 560,
+      "x_mid": 290.0
+    },
+    "unit_price": {
+      "x_start": 20,
+      "x_end": 560,
+      "x_mid": 290.0
+    },
+    "amount": {
+      "x_start": 20,
+      "x_end": 560,
+      "x_mid": 290.0
+    }
+  },
+  "header_hints": {
+    "line_no": [
+      "part",
+      "number/rev/description",
+      "date",
+      "qty",
+      "unit",
+      "price"
+    ],
+    "material": [
+      "part",
+      "number/rev/description",
+      "date",
+      "qty",
+      "unit",
+      "price"
+    ],
+    "description": [
+      "part",
+      "number/rev/description",
+      "date",
+      "qty",
+      "unit",
+      "price"
+    ],
+    "delivery_date": [
+      "part",
+      "number/rev/description",
+      "date",
+      "qty",
+      "unit",
+      "price"
+    ],
+    "quantity": [
+      "part",
+      "number/rev/description",
+      "date",
+      "qty",
+      "unit",
+      "price"
+    ],
+    "uom": [
+      "part",
+      "number/rev/description",
+      "date",
+      "qty",
+      "unit",
+      "price"
+    ],
+    "unit_price": [
+      "part",
+      "number/rev/description",
+      "date",
+      "qty",
+      "unit",
+      "price"
+    ],
+    "amount": [
+      "part",
+      "number/rev/description",
+      "date",
+      "qty",
+      "unit",
+      "price"
+    ]
+  },
+  "layout_signatures": [
+    "1617879_0_1_OF_1_P1_1_0"
+  ],
+  "preferred_page_regions": {
+    "table_page": 1
+  },
+  "last_updated": "2026-04-23 18:30:37.660717+00:00"
+}

@@ -3,6 +3,56 @@ from __future__ import annotations
 
 from io import BytesIO
 from pathlib import Path
+
+
+def _short_source_format(file_name: str | None, mime_type: str | None) -> str:
+    mime = (mime_type or "").lower().strip()
+    mime_map = {
+        "application/pdf": "PDF",
+        "application/vnd.ms-excel": "EXCEL",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "EXCEL",
+        "text/csv": "CSV",
+        "text/plain": "TXT",
+        "application/xml": "XML",
+        "text/xml": "XML",
+        "application/json": "JSON",
+        "application/x-x12": "X12",
+        "application/edifact": "EDIFACT",
+        "image/png": "IMAGE",
+        "image/jpeg": "IMAGE",
+        "image/jpg": "IMAGE",
+        "image/tiff": "IMAGE",
+        "application/msword": "WORD",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "WORD",
+        "text/html": "HTML",
+    }
+    if mime in mime_map:
+        return mime_map[mime]
+
+    ext = Path(file_name or "").suffix.lower().lstrip(".")
+    ext_map = {
+        "pdf": "PDF",
+        "xls": "EXCEL",
+        "xlsx": "EXCEL",
+        "csv": "CSV",
+        "txt": "TXT",
+        "xml": "XML",
+        "json": "JSON",
+        "x12": "X12",
+        "edi": "EDIFACT",
+        "edifact": "EDIFACT",
+        "png": "IMAGE",
+        "jpg": "IMAGE",
+        "jpeg": "IMAGE",
+        "tif": "IMAGE",
+        "tiff": "IMAGE",
+        "doc": "WORD",
+        "docx": "WORD",
+        "html": "HTML",
+        "htm": "HTML",
+    }
+    return ext_map.get(ext, "UNKNOWN")
+
 from uuid import UUID
 
 from fastapi import HTTPException, UploadFile, status
@@ -21,6 +71,12 @@ class InboundService:
         "text/plain",
         "application/xml",
         "application/json",
+        "application/octet-stream",  # X12, EDIFACT, generic uploads
+        "application/x-x12",
+        "application/edifact",
+        "application/pdf",
+        "application/vnd.ms-excel",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     }
 
     def receive_upload(self, db: Session, *, file: UploadFile, client_id: str, user_ctx: UserContext) -> dict:
@@ -56,7 +112,7 @@ class InboundService:
                 client_id=client_id,
                 message_type="PO",
                 source_channel="UPLOAD",
-                source_format=(file.content_type or "unknown"),
+                source_format=_short_source_format(file.filename, file.content_type),
                 source_reference=file.filename,
                 sender=user_ctx.email,
                 receiver=client_id,

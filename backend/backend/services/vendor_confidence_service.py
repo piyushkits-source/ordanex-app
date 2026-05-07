@@ -4,6 +4,12 @@ from typing import Any
 
 
 class VendorConfidenceService:
+    def _clean_header_value(self, value: object) -> str:
+        text = str(value or "").strip()
+        if text.upper() in {"EXCEL_UPLOAD", "CSV_UPLOAD", "TEXT_UPLOAD"}:
+            return ""
+        return text
+
     def evaluate(
         self,
         *,
@@ -42,9 +48,15 @@ class VendorConfidenceService:
                 reasons.append("Layout reused several times")
 
         # 2. Header confidence
-        po_number = str(header_dict.get("po_number", "") or "").strip()
-        po_date = str(header_dict.get("po_date", "") or "").strip()
-        currency = str(header_dict.get("currency", "") or "").strip()
+        po_number = self._clean_header_value(
+            header_dict.get("document_number") or header_dict.get("po_number")
+        )
+        po_date = self._clean_header_value(
+            header_dict.get("document_date") or header_dict.get("po_date")
+        )
+        currency = self._clean_header_value(
+            header_dict.get("currency_code") or header_dict.get("currency")
+        )
 
         if po_number:
             score += 15

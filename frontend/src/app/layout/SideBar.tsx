@@ -4,31 +4,33 @@ import {
   FaCog,
   FaUsers,
   FaPlug,
-  FaSlidersH,
   FaFileAlt,
   FaChartBar,
   FaHandshake,
 } from "react-icons/fa";
+import { getAuth } from "../../utils/auth";
+import { canAccessModule, type AppModuleKey } from "../../utils/access";
 
 const menu = [
-  { label: "Message Monitor",      path: "/monitoring",       icon: <FaInbox /> },
-  { label: "Client Configuration", path: "/client-config",    icon: <FaCog /> },
-  { label: "Trading Partners",     path: "/trading-partners", icon: <FaHandshake /> },
-  { label: "User Management",      path: "/user-admin",       icon: <FaUsers /> },
-  { label: "Connections",          path: "/connections",       icon: <FaPlug /> },
-  { label: "Business Rules",       path: "/business-rules",   icon: <FaSlidersH /> },
-  { label: "Reports",              path: "/reports",           icon: <FaFileAlt /> },
-  { label: "Analytics",            path: "/analytics",         icon: <FaChartBar /> },
+  { label: "Message Monitor", path: "/monitoring", icon: <FaInbox />, moduleKey: "monitoring" as AppModuleKey },
+  { label: "Client Configuration", path: "/client-config", icon: <FaCog />, moduleKey: "client_config" as AppModuleKey },
+  { label: "Trading Partners", path: "/trading-partners", icon: <FaHandshake />, moduleKey: "trading_partners" as AppModuleKey },
+  { label: "User Management", path: "/user-admin", icon: <FaUsers />, moduleKey: "users" as AppModuleKey },
+  { label: "Connections", path: "/connections", icon: <FaPlug />, moduleKey: "connections" as AppModuleKey },
+  { label: "Reports", path: "/reports", icon: <FaFileAlt />, moduleKey: "reports" as AppModuleKey },
+  { label: "Analytics", path: "/analytics", icon: <FaChartBar />, moduleKey: "analytics" as AppModuleKey },
 ];
 
 export default function Sidebar() {
   const location = useLocation();
+  const auth = getAuth();
+  const visibleMenu = menu.filter((item) => canAccessModule(auth, item.moduleKey));
 
   return (
     <div style={sidebarStyle}>
       <div style={header}>Workspace</div>
 
-      {menu.map((item) => {
+      {visibleMenu.map((item) => {
         const active = location.pathname.startsWith(item.path);
 
         return (
