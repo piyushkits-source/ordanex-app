@@ -44,3 +44,5 @@ pytesseract==0.3.13
 python-dotenv==1.0.1
 httpx==0.27.2
 boto3==1.35.36
+
+PyJWT==2.8.0
