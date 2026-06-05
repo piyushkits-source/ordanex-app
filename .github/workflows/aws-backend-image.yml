@@ -41,4 +41,4 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Build and push backend
-        run: ./deploy/production/build_and_push_backend.sh
+        run: bash ./deploy/production/build_and_push_backend.sh
