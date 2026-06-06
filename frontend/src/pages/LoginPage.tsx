@@ -20,6 +20,14 @@ export default function LoginPage() {
     return params.get("next");
   }, [location.search]);
 
+  function handleForgotPassword() {
+    const subject = encodeURIComponent("Password reset request");
+    const body = encodeURIComponent(
+      `Please help me reset my Ordanex password for: ${email || "my account"}`
+    );
+    window.location.href = `mailto:support@ordanex.ai?subject=${subject}&body=${body}`;
+  }
+
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault();
 
@@ -124,7 +132,7 @@ export default function LoginPage() {
               <div>
                 <div style={labelRow}>
                   <span style={labelStyle}>Password</span>
-                  <button type="button" style={linkButton}>
+                  <button type="button" style={linkButton} onClick={handleForgotPassword}>
                     Forgot password?
                   </button>
                 </div>
