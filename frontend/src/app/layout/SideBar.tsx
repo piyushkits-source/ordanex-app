@@ -7,6 +7,7 @@ import {
   FaFileAlt,
   FaChartBar,
   FaHandshake,
+  FaStore,
 } from "react-icons/fa";
 import { getAuth } from "../../utils/auth";
 import { canAccessModule, type AppModuleKey } from "../../utils/access";
@@ -19,6 +20,7 @@ const menu = [
   { label: "Connections", path: "/connections", icon: <FaPlug />, moduleKey: "connections" as AppModuleKey },
   { label: "Reports", path: "/reports", icon: <FaFileAlt />, moduleKey: "reports" as AppModuleKey },
   { label: "Analytics", path: "/analytics", icon: <FaChartBar />, moduleKey: "analytics" as AppModuleKey },
+  { label: "Buyer Portal", path: "/portal", icon: <FaStore />, moduleKey: "buyer_storefront" as AppModuleKey },
 ];
 
 export default function Sidebar() {
@@ -31,12 +33,13 @@ export default function Sidebar() {
       <div style={header}>Workspace</div>
 
       {visibleMenu.map((item) => {
+        const resolvedPath = item.path === "/portal" && auth?.client_id ? `/portal/${auth.client_id}` : item.path;
         const active = location.pathname.startsWith(item.path);
 
         return (
           <NavLink
             key={item.label}
-            to={item.path}
+            to={resolvedPath}
             style={{
               ...itemStyle,
               background: active ? "#eff6ff" : "#fff",

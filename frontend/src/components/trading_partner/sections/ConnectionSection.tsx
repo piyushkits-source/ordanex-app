@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { apiFetch, parseApiError } from "utils/api";
 import { PartnerConnection, TradingPartner } from "types/tradingPartner";
+import { buildConnectionPreset, integrationPresets } from "../integrationPresets";
 
 const API_BASE = "/trading-partners";
 
@@ -153,6 +154,14 @@ export default function ConnectionSection({
     () => CONFIG_FIELDS[form.connection_type] || [],
     [form.connection_type]
   );
+  const customerPortalPresets = useMemo(
+    () => integrationPresets.filter((preset) => preset.category === "SELL_SIDE_PORTAL" || preset.category === "BUY_SIDE_PORTAL"),
+    []
+  );
+  const erpPresets = useMemo(
+    () => integrationPresets.filter((preset) => preset.category === "NATIVE_ERP" || preset.category === "NETWORK"),
+    []
+  );
 
   useEffect(() => {
     setForm(emptyConnection(partner));
@@ -295,6 +304,18 @@ export default function ConnectionSection({
     }));
   }
 
+  function applyPreset(presetId: string) {
+    const preset = integrationPresets.find((item) => item.id === presetId);
+    if (!preset) return;
+
+    setEditingId(null);
+    setForm({
+      ...emptyConnection(partner),
+      ...buildConnectionPreset(partner.partner_name, preset),
+    });
+    onBanner(`Loaded ${preset.vendor} preset into the connection form.`);
+  }
+
   return (
     <div style={card}>
       <div style={headerRow}>
@@ -303,6 +324,65 @@ export default function ConnectionSection({
           <div style={subTitle}>
             Configure how trading partners exchange messages with Ordanex.
           </div>
+        </div>
+      </div>
+
+      <div style={presetWrapper}>
+        <div style={presetHeader}>
+          <div style={title}>Prebuilt Integrations</div>
+          <div style={subTitle}>
+            Launch common customer portal and native ERP connections with a ready-made profile. You can still edit any field after loading a preset.
+          </div>
+        </div>
+
+        <div style={presetSectionTitle}>Customer Portals</div>
+        <div style={presetGrid}>
+          {customerPortalPresets.map((preset) => (
+            <div key={preset.id} style={presetCard}>
+              <div style={presetBadge}>{preset.category.split("_").join(" ")}</div>
+              <div style={presetVendor}>{preset.vendor}</div>
+              <div style={presetName}>{preset.title}</div>
+              <div style={presetSummary}>{preset.summary}</div>
+              <div style={presetMeta}>
+                {preset.connection.connection_type} • {preset.connection.direction} • {preset.connection.message_type}
+              </div>
+              <div style={presetChipRow}>
+                {preset.supportedMessages.map((msg) => (
+                  <span key={`${preset.id}-${msg}`} style={presetChip}>
+                    {msg}
+                  </span>
+                ))}
+              </div>
+              <button type="button" style={miniButton} onClick={() => applyPreset(preset.id)}>
+                Use preset
+              </button>
+            </div>
+          ))}
+        </div>
+
+        <div style={{ ...presetSectionTitle, marginTop: 14 }}>Native ERP / Network Integrations</div>
+        <div style={presetGrid}>
+          {erpPresets.map((preset) => (
+            <div key={preset.id} style={presetCard}>
+              <div style={presetBadge}>{preset.category.split("_").join(" ")}</div>
+              <div style={presetVendor}>{preset.vendor}</div>
+              <div style={presetName}>{preset.title}</div>
+              <div style={presetSummary}>{preset.summary}</div>
+              <div style={presetMeta}>
+                {preset.connection.connection_type} • {preset.connection.direction} • {preset.connection.message_type}
+              </div>
+              <div style={presetChipRow}>
+                {preset.supportedMessages.map((msg) => (
+                  <span key={`${preset.id}-${msg}`} style={presetChip}>
+                    {msg}
+                  </span>
+                ))}
+              </div>
+              <button type="button" style={miniButton} onClick={() => applyPreset(preset.id)}>
+                Use preset
+              </button>
+            </div>
+          ))}
         </div>
       </div>
 
@@ -620,6 +700,97 @@ const miniButton: React.CSSProperties = {
   cursor: "pointer",
 };
 
+const presetWrapper: React.CSSProperties = {
+  marginTop: 16,
+  border: "1px solid #dbe4ee",
+  borderRadius: 14,
+  background: "linear-gradient(180deg, #f8fbff 0%, #ffffff 100%)",
+  padding: 14,
+};
+
+const presetHeader: React.CSSProperties = {
+  display: "grid",
+  gap: 4,
+  marginBottom: 14,
+};
+
+const presetSectionTitle: React.CSSProperties = {
+  fontSize: 12,
+  fontWeight: 800,
+  color: "#1d4ed8",
+  textTransform: "uppercase",
+  letterSpacing: 0.4,
+  marginBottom: 10,
+};
+
+const presetGrid: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))",
+  gap: 12,
+};
+
+const presetCard: React.CSSProperties = {
+  border: "1px solid #e5e7eb",
+  borderRadius: 12,
+  background: "#fff",
+  padding: 12,
+  display: "grid",
+  gap: 8,
+  alignContent: "start",
+};
+
+const presetBadge: React.CSSProperties = {
+  width: "fit-content",
+  padding: "3px 8px",
+  borderRadius: 999,
+  background: "#dbeafe",
+  color: "#1d4ed8",
+  fontSize: 11,
+  fontWeight: 800,
+  letterSpacing: 0.2,
+};
+
+const presetVendor: React.CSSProperties = {
+  fontSize: 13,
+  fontWeight: 800,
+  color: "#0f172a",
+};
+
+const presetName: React.CSSProperties = {
+  fontSize: 12,
+  color: "#334155",
+  fontWeight: 700,
+};
+
+const presetSummary: React.CSSProperties = {
+  fontSize: 12,
+  color: "#64748b",
+  lineHeight: 1.5,
+};
+
+const presetMeta: React.CSSProperties = {
+  fontSize: 11,
+  color: "#475569",
+  fontWeight: 700,
+  textTransform: "uppercase",
+  letterSpacing: 0.3,
+};
+
+const presetChipRow: React.CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 6,
+};
+
+const presetChip: React.CSSProperties = {
+  padding: "4px 8px",
+  borderRadius: 999,
+  background: "#f1f5f9",
+  color: "#334155",
+  fontSize: 11,
+  fontWeight: 700,
+};
+
 const tableStyle: React.CSSProperties = {
   width: "100%",
   borderCollapse: "collapse",
@@ -650,3 +821,4 @@ const tdEmptyStyle: React.CSSProperties = {
   color: "#64748b",
   borderBottom: "1px solid #eef2f7",
 };
+

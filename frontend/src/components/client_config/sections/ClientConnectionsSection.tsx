@@ -73,6 +73,11 @@ const CONFIG_FIELDS: Record<ConnectionType, ConfigField[]> = {
   ],
   API: [
     { key: "endpoint_url", label: "Endpoint URL", placeholder: "https://api.client.com/orders" },
+    { key: "resource_path", label: "Resource Path", placeholder: "/uom / /addresses" },
+    { key: "sync_object", label: "Sync Object", placeholder: "UOM / ADDRESS" },
+    { key: "sync_mode", label: "Sync Mode", placeholder: "REAL_TIME / SCHEDULED" },
+    { key: "webhook_url", label: "Webhook URL", placeholder: "https://erp.client.com/webhooks/uom" },
+    { key: "webhook_secret", label: "Webhook Secret", type: "password", placeholder: "webhook signing secret" },
     { key: "http_method", label: "HTTP Method", placeholder: "POST" },
     { key: "auth_type", label: "Auth Type", placeholder: "BASIC / BEARER / OAUTH2" },
     { key: "username", label: "Username", placeholder: "api user" },
@@ -116,7 +121,7 @@ function getConnectionDetails(row: ConnectionRow) {
       return `${cfg.host || "-"}:${cfg.port || "22"} ${cfg.folder || ""}`.trim();
 
     case "API":
-      return `${cfg.http_method || "POST"} ${cfg.endpoint_url || "-"}`;
+      return `${cfg.http_method || "POST"} ${cfg.endpoint_url || "-"}${cfg.sync_object ? ` | ${cfg.sync_object}` : ""}${cfg.sync_mode ? ` | ${cfg.sync_mode}` : ""}`;
 
     case "AS2":
       return `${cfg.as2_id || "-"}${cfg.partner_as2_id ? ` | ${cfg.partner_as2_id}` : ""}${cfg.endpoint ? ` | ${cfg.endpoint}` : ""}`;
@@ -125,6 +130,39 @@ function getConnectionDetails(row: ConnectionRow) {
       return "-";
   }
 }
+
+const MASTER_DATA_SYNC_PRESETS = [
+  {
+    id: "uom-sync",
+    label: "UOM Sync",
+    description: "Keep client UOM tables aligned with ERP defaults and conversion rules in real time.",
+    message_type: "UOM_SYNC",
+    config_json: {
+      endpoint_url: "https://erp.client.com/api/uom",
+      resource_path: "/uom",
+      sync_object: "UOM",
+      sync_mode: "REAL_TIME",
+      webhook_url: "https://erp.client.com/webhooks/uom",
+      http_method: "POST",
+      auth_type: "BEARER",
+    },
+  },
+  {
+    id: "address-sync",
+    label: "Address Sync",
+    description: "Keep ship-to, sold-to, bill-to, supplier, and warehouse addresses in sync with the client ERP.",
+    message_type: "ADDRESS_SYNC",
+    config_json: {
+      endpoint_url: "https://erp.client.com/api/addresses",
+      resource_path: "/addresses",
+      sync_object: "ADDRESS",
+      sync_mode: "REAL_TIME",
+      webhook_url: "https://erp.client.com/webhooks/addresses",
+      http_method: "POST",
+      auth_type: "BEARER",
+    },
+  },
+] as const;
 
 export default function ClientConnectionsSection({
   client,
@@ -142,6 +180,23 @@ export default function ClientConnectionsSection({
     () => CONFIG_FIELDS[form.connection_type] || [],
     [form.connection_type]
   );
+
+  function applySyncPreset(presetId: string) {
+    const preset = MASTER_DATA_SYNC_PRESETS.find((item) => item.id === presetId);
+    if (!preset) return;
+
+    setEditingId(null);
+    setForm({
+      connection_name: `${client.client_name || "Client"} ${preset.label}`,
+      connection_type: "API",
+      direction: "BOTH",
+      message_type: preset.message_type,
+      message_version: "v1",
+      is_active: true,
+      config_json: { ...preset.config_json },
+    });
+    onBanner(`Loaded ${preset.label} preset for client ERP sync.`, "info");
+  }
 
   useEffect(() => {
     if (client.client_id) {
@@ -299,6 +354,28 @@ export default function ClientConnectionsSection({
         </div>
         <div style={scopePill}>
           {selectedVerticalId ? "Vertical-scoped" : "Client-scoped"}
+        </div>
+      </div>
+
+      <div style={syncPresetPanel}>
+        <div style={syncPresetTitle}>ERP Table Sync Presets</div>
+        <div style={syncPresetSubtitle}>
+          Preconfigure API connections for real-time UOM and Address synchronization with the client ERP.
+        </div>
+        <div style={syncPresetGrid}>
+          {MASTER_DATA_SYNC_PRESETS.map((preset) => (
+            <div key={preset.id} style={syncPresetCard}>
+              <div style={syncPresetBadge}>API Sync</div>
+              <div style={syncPresetName}>{preset.label}</div>
+              <div style={syncPresetCopy}>{preset.description}</div>
+              <div style={syncPresetMeta}>
+                {preset.config_json.sync_object} • {preset.config_json.sync_mode} • {preset.config_json.auth_type}
+              </div>
+              <button type="button" style={presetButton} onClick={() => applySyncPreset(preset.id)}>
+                Use preset
+              </button>
+            </div>
+          ))}
         </div>
       </div>
 
@@ -601,6 +678,24 @@ const miniButton: React.CSSProperties = {
   fontWeight: 700,
   cursor: "pointer",
 };
+
+const syncPresetPanel: React.CSSProperties = {
+  marginBottom: 16,
+  padding: 14,
+  border: "1px solid #dbe4ee",
+  borderRadius: 12,
+  background: "linear-gradient(180deg, #f8fbff 0%, #ffffff 100%)",
+};
+
+const syncPresetTitle: React.CSSProperties = { fontSize: 15, fontWeight: 800, color: "#0f172a" };
+const syncPresetSubtitle: React.CSSProperties = { fontSize: 12, color: "#64748b", marginTop: 4 };
+const syncPresetGrid: React.CSSProperties = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12, marginTop: 12 };
+const syncPresetCard: React.CSSProperties = { border: "1px solid #e5e7eb", borderRadius: 12, background: "#fff", padding: 12, display: "grid", gap: 8 };
+const syncPresetBadge: React.CSSProperties = { width: "fit-content", padding: "3px 8px", borderRadius: 999, background: "#dbeafe", color: "#1d4ed8", fontSize: 11, fontWeight: 800 };
+const syncPresetName: React.CSSProperties = { fontSize: 13, fontWeight: 800, color: "#0f172a" };
+const syncPresetCopy: React.CSSProperties = { fontSize: 12, color: "#64748b", lineHeight: 1.5 };
+const syncPresetMeta: React.CSSProperties = { fontSize: 11, color: "#475569", fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.2 };
+const presetButton: React.CSSProperties = { border: "1px solid #dbe4ee", background: "#fff", color: "#0f172a", borderRadius: 8, padding: "8px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer" };
 
 const tableStyle: React.CSSProperties = {
   width: "100%",

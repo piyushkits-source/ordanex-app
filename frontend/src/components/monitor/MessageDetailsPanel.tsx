@@ -14,6 +14,7 @@ import type {
   ActivityLog,
   ProcessingStep,
 } from "../../types/monitoring";
+import { getAuthHeaders } from "../../utils/auth";
 
 type Props = {
   row: MonitoringRow;
@@ -49,6 +50,7 @@ export default function MessageDetailsPanel({
   onSelectField,
   activityLogs,
   processingFlow,
+  onRefresh,
   onSave,
   onSaveAndReprocess,
   onArchive,
@@ -70,11 +72,34 @@ export default function MessageDetailsPanel({
   const [archiveComment, setArchiveComment] = useState("");
   const [issueType, setIssueType] = useState("DATA_EXTRACTION");
   const [issueComments, setIssueComments] = useState("");
+  const [portalCommerceLoading, setPortalCommerceLoading] = useState(false);
+  const [portalCommerceSaving, setPortalCommerceSaving] = useState(false);
+  const [portalCommerceMessage, setPortalCommerceMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [portalCommerce, setPortalCommerce] = useState({
+    invoice_number: "",
+    invoice_date: "",
+    invoice_amount: "",
+    currency: "",
+    due_date: "",
+    payment_status: "",
+    invoice_url: "",
+    invoice_notes: "",
+    shipment_number: "",
+    shipment_status: "",
+    carrier: "",
+    tracking_number: "",
+    tracking_url: "",
+    ship_date: "",
+    estimated_delivery_date: "",
+    delivered_date: "",
+    shipment_notes: "",
+  });
 
   const normalizedStatus = (row.status || "").toUpperCase();
   const canEditActions = ["NEW", "PENDING", "ERROR", "FAILED", "CORRECTED"].includes(
     normalizedStatus
   );
+  const isBuyerPortalOrder = String(row.source_type || "").toUpperCase() === "BUYER_PORTAL";
   const messageFamily = String(
     row.message_family || row.message_type || row.po_type || row.order_type || "PO"
   ).toUpperCase();
@@ -169,6 +194,67 @@ export default function MessageDetailsPanel({
   }
 
   useEffect(() => {
+    if (!isBuyerPortalOrder || !row.po_id) {
+      setPortalCommerceMessage(null);
+      return;
+    }
+
+    let active = true;
+    setPortalCommerceLoading(true);
+    fetch(`/buyer-portal/orders/${row.po_id}`, {
+      headers: getAuthHeaders(),
+      cache: "no-store",
+    })
+      .then(async (res) => {
+        if (!res.ok) {
+          const text = await res.text();
+          throw new Error(text || "Failed to load portal order commerce details.");
+        }
+        return res.json();
+      })
+      .then((data) => {
+        if (!active) return;
+        setPortalCommerce({
+          invoice_number: data?.invoice?.invoice_number || "",
+          invoice_date: data?.invoice?.invoice_date || "",
+          invoice_amount:
+            data?.invoice?.invoice_amount === null || data?.invoice?.invoice_amount === undefined
+              ? ""
+              : String(data.invoice.invoice_amount),
+          currency: data?.invoice?.currency || headerState.currency_code || row.currency || "",
+          due_date: data?.invoice?.due_date || "",
+          payment_status: data?.invoice?.payment_status || data?.payment_status || "",
+          invoice_url: data?.invoice?.invoice_url || "",
+          invoice_notes: data?.invoice?.invoice_notes || "",
+          shipment_number: data?.shipment?.shipment_number || "",
+          shipment_status: data?.shipment?.shipment_status || data?.dispatch_status || "",
+          carrier: data?.shipment?.carrier || "",
+          tracking_number: data?.shipment?.tracking_number || "",
+          tracking_url: data?.shipment?.tracking_url || "",
+          ship_date: data?.shipment?.ship_date || "",
+          estimated_delivery_date: data?.shipment?.estimated_delivery_date || "",
+          delivered_date: data?.shipment?.delivered_date || "",
+          shipment_notes: data?.shipment?.shipment_notes || "",
+        });
+        setPortalCommerceMessage(null);
+      })
+      .catch((err: any) => {
+        if (!active) return;
+        setPortalCommerceMessage({
+          type: "error",
+          text: err?.message || "Failed to load portal commerce details.",
+        });
+      })
+      .finally(() => {
+        if (active) setPortalCommerceLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [isBuyerPortalOrder, row.po_id, row.currency, headerState.currency_code]);
+
+  useEffect(() => {
     if (!selectedField) return;
 
     const m = mappingMap[selectedField];
@@ -216,6 +302,65 @@ export default function MessageDetailsPanel({
         : { ...next[index], [key]: value };
     onItemsStateChange(next);
     onItemFieldDirty(index, key);
+  }
+
+  function updatePortalCommerceField(key: string, value: string) {
+    setPortalCommerce((prev) => ({ ...prev, [key]: value }));
+  }
+
+  async function savePortalCommerce() {
+    if (!row.po_id) return;
+    try {
+      setPortalCommerceSaving(true);
+      setPortalCommerceMessage(null);
+      const payload = {
+        invoice: {
+          invoice_number: portalCommerce.invoice_number || undefined,
+          invoice_date: portalCommerce.invoice_date || undefined,
+          invoice_amount: portalCommerce.invoice_amount ? Number(portalCommerce.invoice_amount) : undefined,
+          currency: portalCommerce.currency || undefined,
+          due_date: portalCommerce.due_date || undefined,
+          payment_status: portalCommerce.payment_status || undefined,
+          invoice_url: portalCommerce.invoice_url || undefined,
+          invoice_notes: portalCommerce.invoice_notes || undefined,
+        },
+        shipment: {
+          shipment_number: portalCommerce.shipment_number || undefined,
+          shipment_status: portalCommerce.shipment_status || undefined,
+          carrier: portalCommerce.carrier || undefined,
+          tracking_number: portalCommerce.tracking_number || undefined,
+          tracking_url: portalCommerce.tracking_url || undefined,
+          ship_date: portalCommerce.ship_date || undefined,
+          estimated_delivery_date: portalCommerce.estimated_delivery_date || undefined,
+          delivered_date: portalCommerce.delivered_date || undefined,
+          shipment_notes: portalCommerce.shipment_notes || undefined,
+        },
+      };
+      const res = await fetch(`/buyer-portal/orders/${row.po_id}/commerce`, {
+        method: "PATCH",
+        headers: getAuthHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify(payload),
+      });
+      const raw = await res.text();
+      const data = raw ? JSON.parse(raw) : {};
+      if (!res.ok) {
+        throw new Error(data?.detail || data?.message || raw || "Failed to update invoice and shipment details.");
+      }
+      setPortalCommerceMessage({
+        type: "success",
+        text: "Portal-managed invoice and shipment details updated.",
+      });
+      if (onRefresh) {
+        await onRefresh();
+      }
+    } catch (err: any) {
+      setPortalCommerceMessage({
+        type: "error",
+        text: err?.message || "Failed to update portal-managed commerce details.",
+      });
+    } finally {
+      setPortalCommerceSaving(false);
+    }
   }
 
   function addLineItem() {
@@ -919,6 +1064,96 @@ export default function MessageDetailsPanel({
           </div>
         )}
       </SectionShell>
+
+      {isBuyerPortalOrder && (
+        <SectionShell title="Supplier Commerce Updates">
+          <div style={{ color: "#64748b", fontSize: 13, marginBottom: 12 }}>
+            Use this section for portal-managed suppliers to publish invoice and shipment progress back to the buyer portal.
+          </div>
+          {portalCommerceMessage ? (
+            <div
+              style={{
+                marginBottom: 12,
+                padding: "10px 12px",
+                borderRadius: 10,
+                border: portalCommerceMessage.type === "error" ? "1px solid #fecaca" : "1px solid #bbf7d0",
+                background: portalCommerceMessage.type === "error" ? "#fef2f2" : "#f0fdf4",
+                color: portalCommerceMessage.type === "error" ? "#b91c1c" : "#166534",
+                fontSize: 13,
+                fontWeight: 600,
+              }}
+            >
+              {portalCommerceMessage.text}
+            </div>
+          ) : null}
+          <div style={{ ...grid4, marginBottom: 10 }}>
+            <FieldTile label="Invoice Number">
+              <input value={portalCommerce.invoice_number} onChange={(e) => updatePortalCommerceField("invoice_number", e.target.value)} style={inputStyle(false)} />
+            </FieldTile>
+            <FieldTile label="Invoice Date">
+              <input value={portalCommerce.invoice_date} onChange={(e) => updatePortalCommerceField("invoice_date", e.target.value)} style={inputStyle(false)} placeholder="YYYY-MM-DD" />
+            </FieldTile>
+            <FieldTile label="Invoice Amount">
+              <input value={portalCommerce.invoice_amount} onChange={(e) => updatePortalCommerceField("invoice_amount", e.target.value)} style={inputStyle(false)} />
+            </FieldTile>
+            <FieldTile label="Currency">
+              <input value={portalCommerce.currency} onChange={(e) => updatePortalCommerceField("currency", e.target.value)} style={inputStyle(false)} />
+            </FieldTile>
+          </div>
+          <div style={{ ...grid4, marginBottom: 10 }}>
+            <FieldTile label="Due Date">
+              <input value={portalCommerce.due_date} onChange={(e) => updatePortalCommerceField("due_date", e.target.value)} style={inputStyle(false)} placeholder="YYYY-MM-DD" />
+            </FieldTile>
+            <FieldTile label="Payment Status">
+              <input value={portalCommerce.payment_status} onChange={(e) => updatePortalCommerceField("payment_status", e.target.value)} style={inputStyle(false)} placeholder="Invoice issued / Paid / Overdue" />
+            </FieldTile>
+            <FieldTile label="Invoice URL">
+              <input value={portalCommerce.invoice_url} onChange={(e) => updatePortalCommerceField("invoice_url", e.target.value)} style={inputStyle(false)} placeholder="https://..." />
+            </FieldTile>
+            <FieldTile label="Shipment Number">
+              <input value={portalCommerce.shipment_number} onChange={(e) => updatePortalCommerceField("shipment_number", e.target.value)} style={inputStyle(false)} />
+            </FieldTile>
+          </div>
+          <div style={{ ...grid4, marginBottom: 10 }}>
+            <FieldTile label="Shipment Status">
+              <input value={portalCommerce.shipment_status} onChange={(e) => updatePortalCommerceField("shipment_status", e.target.value)} style={inputStyle(false)} placeholder="SHIPPED / IN_TRANSIT / DELIVERED" />
+            </FieldTile>
+            <FieldTile label="Carrier">
+              <input value={portalCommerce.carrier} onChange={(e) => updatePortalCommerceField("carrier", e.target.value)} style={inputStyle(false)} />
+            </FieldTile>
+            <FieldTile label="Tracking Number">
+              <input value={portalCommerce.tracking_number} onChange={(e) => updatePortalCommerceField("tracking_number", e.target.value)} style={inputStyle(false)} />
+            </FieldTile>
+            <FieldTile label="Tracking URL">
+              <input value={portalCommerce.tracking_url} onChange={(e) => updatePortalCommerceField("tracking_url", e.target.value)} style={inputStyle(false)} placeholder="https://..." />
+            </FieldTile>
+          </div>
+          <div style={{ ...grid3, marginBottom: 10 }}>
+            <FieldTile label="Ship Date">
+              <input value={portalCommerce.ship_date} onChange={(e) => updatePortalCommerceField("ship_date", e.target.value)} style={inputStyle(false)} placeholder="YYYY-MM-DD" />
+            </FieldTile>
+            <FieldTile label="ETA">
+              <input value={portalCommerce.estimated_delivery_date} onChange={(e) => updatePortalCommerceField("estimated_delivery_date", e.target.value)} style={inputStyle(false)} placeholder="YYYY-MM-DD" />
+            </FieldTile>
+            <FieldTile label="Delivered Date">
+              <input value={portalCommerce.delivered_date} onChange={(e) => updatePortalCommerceField("delivered_date", e.target.value)} style={inputStyle(false)} placeholder="YYYY-MM-DD" />
+            </FieldTile>
+          </div>
+          <div style={{ ...grid2, marginBottom: 12 }}>
+            <FieldTile label="Invoice Notes">
+              <textarea value={portalCommerce.invoice_notes} onChange={(e) => updatePortalCommerceField("invoice_notes", e.target.value)} style={{ ...inputStyle(false), minHeight: 72 }} />
+            </FieldTile>
+            <FieldTile label="Shipment Notes">
+              <textarea value={portalCommerce.shipment_notes} onChange={(e) => updatePortalCommerceField("shipment_notes", e.target.value)} style={{ ...inputStyle(false), minHeight: 72 }} />
+            </FieldTile>
+          </div>
+          <div style={{ display: "flex", justifyContent: "flex-end" }}>
+            <button type="button" onClick={savePortalCommerce} disabled={portalCommerceLoading || portalCommerceSaving} style={primaryActionBtn}>
+              {portalCommerceSaving ? "Saving..." : portalCommerceLoading ? "Loading..." : "Save Invoice & Shipment"}
+            </button>
+          </div>
+        </SectionShell>
+      )}
       <SectionShell title="Ship To">
         <div style={grid3}>
           <FieldTile

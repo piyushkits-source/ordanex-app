@@ -4,6 +4,7 @@ import ClientMasterSection from "components/client_config/sections/ClientMasterS
 import BusinessVerticalSection from "components/client_config/sections/BusinessVerticalSection";
 import ClientConnectionsSection from "components/client_config/sections/ClientConnectionsSection";
 import ClientErpMessagesSection from "components/client_config/sections/ClientErpMessagesSection";
+import ClientStorefrontSection from "components/client_config/sections/ClientStorefrontSection";
 import { apiFetch, parseApiError } from "utils/api";
 import { useAppScope } from "context/AppScopeContext";
 
@@ -20,10 +21,11 @@ type ClientRow = {
   default_ship_to?: string | null;
 };
 
-type SectionKey = "CLIENT" | "VERTICALS" | "CONNECTIONS" | "ERP";
+type SectionKey = "CLIENT" | "STOREFRONT" | "VERTICALS" | "CONNECTIONS" | "ERP";
 
 const sections: { key: SectionKey; label: string; helper: string }[] = [
   { key: "CLIENT", label: "Client Master", helper: "Identity, subscription, and default business values" },
+  { key: "STOREFRONT", label: "Storefront", helper: "Buyer portal setup, approval list, and catalog source" },
   { key: "VERTICALS", label: "Business Verticals", helper: "Business entities that operate under the client" },
   { key: "CONNECTIONS", label: "Client Connections", helper: "How the client exchanges messages with Ordanex" },
   { key: "ERP", label: "ERP & Message Types", helper: "ERP landscape, formats, message types, and directions" },
@@ -270,6 +272,13 @@ export default function ClientConfigWorkspacePage() {
                     setCreateMode(false);
                     await loadClients();
                   }}
+                  onBanner={(text, type = "success") => setBanner({ text, type })}
+                />
+              )}
+
+              {activeSection === "STOREFRONT" && selectedClient && (
+                <ClientStorefrontSection
+                  client={selectedClient}
                   onBanner={(text, type = "success") => setBanner({ text, type })}
                 />
               )}

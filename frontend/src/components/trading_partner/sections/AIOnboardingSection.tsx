@@ -3,6 +3,7 @@ import { apiFetch, parseApiError } from "utils/api";
 import { getAuth } from "utils/auth";
 import { TradingPartner } from "types/tradingPartner";
 import { useAppScope } from "context/AppScopeContext";
+import { buildOnboardingPreset, integrationPresets } from "../integrationPresets";
 
 const API_BASE = "/trading-partners-agentic";
 
@@ -162,6 +163,17 @@ export default function AIOnboardingSection({
     } catch (err: any) {
       onBanner(err?.message || "Unable to create agentic onboarding project.");
     }
+  }
+
+  function applyPreset(presetId: string) {
+    const preset = integrationPresets.find((item) => item.id === presetId);
+    if (!preset) return;
+
+    setForm((prev) => ({
+      ...prev,
+      ...buildOnboardingPreset(partner.partner_name, preset),
+    }));
+    onBanner(`Loaded ${preset.vendor} onboarding preset into the form.`);
   }
 
   async function startPremiumQuickLaunch() {
@@ -402,6 +414,36 @@ export default function AIOnboardingSection({
       <div style={invoiceHint}>
         Orders, order changes, order responses, ASN, and AP / AR invoices are supported across PDF, IDOC, XML, API, X12, EDIFACT, and AI-assisted onboarding flows.
       </div>
+      <div style={launchPadCard}>
+        <div style={detailTitle}>Prebuilt Launch Profiles</div>
+        <div style={subTitle}>
+          Load a portal or ERP profile to prefill the onboarding form with the right message family, document standard, direction, and extraction mode.
+        </div>
+        <div style={launchPadGrid}>
+          {integrationPresets.map((preset) => (
+            <div key={preset.id} style={launchPadPresetCard}>
+              <div style={launchPadBadge}>{preset.category.split("_").join(" ")}</div>
+              <div style={launchPadVendor}>{preset.vendor}</div>
+              <div style={launchPadName}>{preset.title}</div>
+              <div style={launchPadSummary}>{preset.summary}</div>
+              <div style={launchPadMeta}>
+                {preset.onboarding.message_family} • {preset.onboarding.message_standard} • {preset.onboarding.direction}
+              </div>
+              <div style={launchPadChipRow}>
+                {preset.supportedMessages.map((msg) => (
+                  <span key={`${preset.id}-${msg}`} style={launchPadChip}>
+                    {msg}
+                  </span>
+                ))}
+              </div>
+              <button type="button" style={secondaryButton} onClick={() => applyPreset(preset.id)}>
+                Use in onboarding
+              </button>
+            </div>
+          ))}
+        </div>
+      </div>
+
       {selectedProject?.current_stage === "COLLECT_REQUIREMENTS" ? (
         <div style={collectRequirementsBanner}>
           Collect Requirements is the working stage for uploading mapping specifications, EDI guidelines, and representative invoice or order samples. Uploads are enabled when the active environment is set to Staging.
@@ -537,9 +579,9 @@ export default function AIOnboardingSection({
                 <div key={`${artifact.file_id || artifact.file_name}-${idx}`} style={artifactPill}>
                   <strong>{artifact.file_name || "Artifact"}</strong>
                   <span style={{ color: "#64748b" }}>
-                    {String(artifact.artifact_type || "").replaceAll("_", " ")}
+                    {String(artifact.artifact_type || "").split("_").join(" ")}
                     {artifact.scenario_label ? ` • ${artifact.scenario_label}` : ""}
-                    {artifact.scenario_category ? ` • ${String(artifact.scenario_category).replaceAll("_", " ")}` : ""}
+                    {artifact.scenario_category ? ` • ${String(artifact.scenario_category).split("_").join(" ")}` : ""}
                   </span>
                 </div>
               ))}
@@ -827,7 +869,7 @@ export default function AIOnboardingSection({
                           <div key={`${artifact.file_id || artifact.file_name}-${idx}`} style={artifactPill}>
                             <strong>{artifact.file_name || "Artifact"}</strong>
                             <span style={{ color: "#64748b" }}>
-                              {String(artifact.artifact_type || "").replaceAll("_", " ")}
+                              {String(artifact.artifact_type || "").split("_").join(" ")}
                               {artifact.scenario_label ? ` • ${artifact.scenario_label}` : ""}
                             </span>
                           </div>
@@ -1018,6 +1060,16 @@ const emptyState: React.CSSProperties = { color: "#64748b", fontSize: 13, lineHe
 const summaryCard: React.CSSProperties = { border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "#f8fafc", display: "grid", gap: 8, marginBottom: 12 };
 const invoiceHint: React.CSSProperties = { marginTop: 10, padding: "10px 12px", borderRadius: 12, background: "#eff6ff", border: "1px solid #bfdbfe", color: "#1e3a8a", fontSize: 12, fontWeight: 600 };
 const premiumQuickStartCard: React.CSSProperties = { marginTop: 14, padding: 14, borderRadius: 14, border: "1px solid #c7d2fe", background: "linear-gradient(180deg, #eef2ff 0%, #f8fbff 100%)" };
+const launchPadCard: React.CSSProperties = { marginTop: 14, padding: 14, borderRadius: 14, border: "1px solid #dbe4ee", background: "linear-gradient(180deg, #f8fbff 0%, #ffffff 100%)" };
+const launchPadGrid: React.CSSProperties = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))", gap: 12, marginTop: 12 };
+const launchPadPresetCard: React.CSSProperties = { border: "1px solid #e5e7eb", borderRadius: 12, background: "#fff", padding: 12, display: "grid", gap: 8, alignContent: "start" };
+const launchPadBadge: React.CSSProperties = { width: "fit-content", padding: "3px 8px", borderRadius: 999, background: "#dbeafe", color: "#1d4ed8", fontSize: 11, fontWeight: 800, letterSpacing: 0.2 };
+const launchPadVendor: React.CSSProperties = { fontSize: 13, fontWeight: 800, color: "#0f172a" };
+const launchPadName: React.CSSProperties = { fontSize: 12, color: "#334155", fontWeight: 700 };
+const launchPadSummary: React.CSSProperties = { fontSize: 12, color: "#64748b", lineHeight: 1.5 };
+const launchPadMeta: React.CSSProperties = { fontSize: 11, color: "#475569", fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.3 };
+const launchPadChipRow: React.CSSProperties = { display: "flex", flexWrap: "wrap", gap: 6 };
+const launchPadChip: React.CSSProperties = { padding: "4px 8px", borderRadius: 999, background: "#f1f5f9", color: "#334155", fontSize: 11, fontWeight: 700 };
 
 const messageControlHero: React.CSSProperties = { display: "grid", gap: 8, padding: 12, borderRadius: 12, background: "linear-gradient(135deg, #eff6ff 0%, #f8fafc 100%)", border: "1px solid #bfdbfe" };
 
@@ -1051,3 +1103,4 @@ const summaryListRow: React.CSSProperties = { display: "grid", gap: 4, border: "
 const summaryLabel: React.CSSProperties = { fontSize: 11, fontWeight: 800, color: "#64748b", textTransform: "uppercase", letterSpacing: 0.3 };
 const summaryValue: React.CSSProperties = { fontSize: 13, color: "#0f172a", lineHeight: 1.5 };
 const emptyHint: React.CSSProperties = { fontSize: 12, color: "#64748b", lineHeight: 1.6 };
+

@@ -109,7 +109,7 @@ export default function MessageMonitorPage() {
     return {
       ...row,
       id: row.id || row.po_id || "",
-      documentId: row.documentId || row.po_id || "",
+      documentId: row.docnum || row.documentId || row.po_id || "",
       messageType: resolveMessageType(row),
       message_type: row.message_type || row.messageType || resolveMessageType(row),
       message_family: row.message_family || row.document_type || row.po_type || row.order_type || resolveMessageType(row),
@@ -120,8 +120,8 @@ export default function MessageMonitorPage() {
         row.invoice_number ||
         row.billing_document_number ||
         row.reference_po_number ||
-        row.docnum ||
         row.po_number ||
+        row.docnum ||
         "",
       direction: row.direction || row.message_direction || row.flow_direction || undefined,
       environment: row.environment || "PROD",
@@ -310,7 +310,7 @@ export default function MessageMonitorPage() {
 
     const lines = sortedRows.map((r) => [
       r.status || "",
-      r.po_id || "",
+      r.documentId || r.docnum || r.po_id || "",
       resolveMessageType(r),
       r.sender || "",
       r.receiver || "",
@@ -345,7 +345,7 @@ export default function MessageMonitorPage() {
         (r) => `
         <tr>
           <td>${escapeHtml(r.status || "")}</td>
-          <td>${escapeHtml(r.po_id || "")}</td>
+          <td>${escapeHtml(r.documentId || r.docnum || r.po_id || "")}</td>
           <td>{escapeHtml(resolveMessageType(r))}</td>
           <td>${escapeHtml(r.sender || "")}</td>
           <td>${escapeHtml(r.receiver || "")}</td>
@@ -515,14 +515,14 @@ export default function MessageMonitorPage() {
                       style={{ cursor: "pointer" }}
                     >
                       <td>{row.status || "-"}</td>
-                      <td>{(row as any).docnum || row.po_id || "-"}</td>
+                      <td>{(row as any).documentId || (row as any).docnum || row.po_id || "-"}</td>
                       <td>{resolveMessageType(row as any)}</td>
                       <td>{(row as any).sender || "-"}</td>
                       <td>{(row as any).receiver || (row as any).supplier_name || "-"}</td>
                       <td>{formatDateTime((row as any).created_at)}</td>
                       <td>{(row as any).po_confidence || ((row.items || []).length ? "MEDIUM" : "LOW")}</td>
                       <td>{(row as any).source_type || "-"}</td>
-                      <td>{(row as any).transaction_id || row.po_number || "-"}</td>
+                      <td>{(row as any).transactionNumber || (row as any).transaction_id || (row as any).document_number || row.po_number || (row as any).docnum || "-"}</td>
                     </tr>
 
                     {isExpanded && (

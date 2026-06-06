@@ -1,0 +1,1478 @@
+import React, { useEffect, useMemo, useState } from "react";
+import {
+  fetchBuyerAccess,
+  fetchBuyerCatalog,
+  fetchBuyerOrder,
+  fetchBuyerOrders,
+  fetchBuyerPortalSettings,
+  submitBuyerOrder,
+  type BuyerPortalCatalogItem,
+  type BuyerPortalMediaItem,
+  type BuyerPortalOrder,
+  type BuyerPortalOrderItem,
+  type BuyerPortalSettings,
+} from "../api/buyerPortalApi";
+import { uploadPortalFile } from "../api/fileStorageApi";
+
+type Props = {
+  clientId?: string;
+};
+
+type CartLine = BuyerPortalCatalogItem & { quantity: number };
+
+type TrackingStep = {
+  key: string;
+  label: string;
+  status: "complete" | "active" | "pending";
+  detail: string;
+};
+
+const MAX_PAYMENT_PROOF_BYTES = 4 * 1024 * 1024;
+
+function resolveClientId(explicitClientId?: string) {
+  if (explicitClientId) return explicitClientId;
+  if (typeof window === "undefined") return "";
+  const parts = window.location.pathname.split("/").filter(Boolean);
+  return parts[parts.length - 1] || "";
+}
+
+function money(value: number, currency = "USD") {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency,
+    maximumFractionDigits: 2,
+  }).format(value || 0);
+}
+
+function statusColor(status?: string | null) {
+  const value = String(status || "").toUpperCase();
+  if (value.includes("FAIL") || value.includes("ERROR") || value.includes("REJECT")) {
+    return { bg: "#fef2f2", fg: "#b91c1c" };
+  }
+  if (value.includes("PEND") || value.includes("HOLD") || value.includes("NEW") || value.includes("RECEIVED")) {
+    return { bg: "#fffbeb", fg: "#b45309" };
+  }
+  return { bg: "#f0fdf4", fg: "#15803d" };
+}
+
+function normalizeMethods(settings: BuyerPortalSettings | null) {
+  const methods = settings?.payments?.accepted_methods;
+  if (Array.isArray(methods) && methods.length) return methods.filter(Boolean);
+  return ["Bank transfer", "Card", "UPI"];
+}
+
+function specsEntries(specifications?: Record<string, string> | null) {
+  if (!specifications || typeof specifications !== "object") return [];
+  return Object.entries(specifications).filter(([key, value]) => key && value);
+}
+
+function normalizeMedia(item: BuyerPortalCatalogItem): BuyerPortalMediaItem[] {
+  const media = Array.isArray(item.media) ? item.media.filter((entry) => entry?.url) : [];
+  if (item.image_url && !media.some((entry) => entry.url === item.image_url)) {
+    media.unshift({ kind: "image", url: item.image_url });
+  }
+  if (item.video_url && !media.some((entry) => entry.url === item.video_url)) {
+    media.push({ kind: "video", url: item.video_url });
+  }
+  return media.map((entry) => ({
+    ...entry,
+    kind: entry.kind || (/\.(mp4|webm|ogg)$/i.test(entry.url) ? "video" : "image"),
+  }));
+}
+
+function buildTrackingSteps(
+  order: BuyerPortalOrder | null,
+  sellerMode: string,
+  paymentsEnabled: boolean,
+  paymentStatus: string,
+): TrackingStep[] {
+  if (!order) {
+    return [
+      {
+        key: "received",
+        label: "Order received",
+        status: "pending",
+        detail: "Submit a buyer order to start tracking the flow.",
+      },
+      {
+        key: "payment",
+        label: paymentsEnabled ? "Payment" : "Commercial approval",
+        status: "pending",
+        detail: paymentsEnabled ? "Payment and commercial terms will appear here." : "Commercial approval updates will appear here.",
+      },
+      {
+        key: "processing",
+        label: sellerMode === "ERP_INTEGRATED" ? "ERP / order processing" : "Supplier fulfillment",
+        status: "pending",
+        detail:
+          sellerMode === "ERP_INTEGRATED"
+            ? "ERP status and fulfilment handoff will appear here."
+            : "Supplier-side fulfilment updates will appear here.",
+      },
+    ];
+  }
+
+  const orderStatus = String(order.status || "").toUpperCase();
+  const paymentStepStatus: TrackingStep["status"] = !paymentsEnabled
+    ? "complete"
+    : paymentStatus.toLowerCase().includes("captured") || paymentStatus.toLowerCase().includes("paid")
+      ? "complete"
+      : orderStatus.includes("ERROR")
+        ? "active"
+        : "active";
+
+  const processingComplete =
+    Boolean(order.processed_at) ||
+    String(order.dispatch_status || "").trim() !== "" ||
+    String(order.ack_status || "").trim() !== "";
+
+  return [
+    {
+      key: "received",
+      label: "Order received",
+      status: "complete",
+      detail: order.po_number || order.po_id || "Buyer order captured.",
+    },
+    {
+      key: "payment",
+      label: paymentsEnabled ? "Payment" : "Commercial approval",
+      status: paymentStepStatus,
+      detail: paymentStatus,
+    },
+    {
+      key: "processing",
+      label: sellerMode === "ERP_INTEGRATED" ? "ERP / order processing" : "Supplier fulfillment",
+      status: processingComplete ? "complete" : "active",
+      detail:
+        sellerMode === "ERP_INTEGRATED"
+          ? `Dispatch: ${order.dispatch_status || "Pending"}, acknowledgement: ${order.ack_status || "Pending"}`
+          : order.po_validation_reason || "Supplier can confirm, pack, ship, and close the order from Ordanex.",
+    },
+  ];
+}
+
+export default function BuyerPortalPage({ clientId: propClientId }: Props) {
+  const clientId = useMemo(() => resolveClientId(propClientId), [propClientId]);
+  const [accessState, setAccessState] = useState<any>(null);
+  const [accessLoading, setAccessLoading] = useState(true);
+  const [catalog, setCatalog] = useState<BuyerPortalCatalogItem[]>([]);
+  const [cart, setCart] = useState<CartLine[]>([]);
+  const [search, setSearch] = useState("");
+  const [category, setCategory] = useState("All");
+  const [loading, setLoading] = useState(false);
+  const [banner, setBanner] = useState<string | null>(null);
+  const [buyerName, setBuyerName] = useState("");
+  const [buyerEmail, setBuyerEmail] = useState("");
+  const [companyName, setCompanyName] = useState("");
+  const [shipTo, setShipTo] = useState("");
+  const [shipToAddress, setShipToAddress] = useState("");
+  const [notes, setNotes] = useState("");
+  const [currency, setCurrency] = useState("USD");
+  const [paymentMethod, setPaymentMethod] = useState("Bank transfer");
+  const [paymentReference, setPaymentReference] = useState("");
+  const [paymentProofName, setPaymentProofName] = useState("");
+  const [paymentProofUrl, setPaymentProofUrl] = useState("");
+  const [paymentProofDataUrl, setPaymentProofDataUrl] = useState("");
+  const [recentOrders, setRecentOrders] = useState<BuyerPortalOrder[]>([]);
+  const [submittedOrder, setSubmittedOrder] = useState<BuyerPortalOrder | null>(null);
+  const [portalSettings, setPortalSettings] = useState<BuyerPortalSettings | null>(null);
+  const [activeMediaBySku, setActiveMediaBySku] = useState<Record<string, number>>({});
+  const [galleryProduct, setGalleryProduct] = useState<BuyerPortalCatalogItem | null>(null);
+  const [galleryIndex, setGalleryIndex] = useState(0);
+
+  useEffect(() => {
+    if (!clientId) {
+      setAccessLoading(false);
+      setBanner("Missing client id in the storefront URL.");
+      return;
+    }
+    setAccessLoading(true);
+    fetchBuyerAccess(clientId)
+      .then((state) => setAccessState(state))
+      .catch((err: any) => {
+        setAccessState({ client_id: clientId, buyer_storefront: false });
+        setBanner(err?.message || "Buyer storefront access is not enabled for this client.");
+      })
+      .finally(() => setAccessLoading(false));
+  }, [clientId]);
+
+  useEffect(() => {
+    if (!clientId || accessLoading || !accessState?.buyer_storefront) return;
+    fetchBuyerPortalSettings(clientId)
+      .then((settings) => setPortalSettings(settings || null))
+      .catch((err: any) => setBanner(err?.message || "Failed to load storefront settings."));
+  }, [clientId, accessLoading, accessState?.buyer_storefront]);
+
+  useEffect(() => {
+    if (!clientId || accessLoading || !accessState?.buyer_storefront) return;
+    setLoading(true);
+    Promise.all([fetchBuyerCatalog(clientId), fetchBuyerOrders(clientId)])
+      .then(([catalogRows, orders]) => {
+        setCatalog(Array.isArray(catalogRows) ? catalogRows : []);
+        setRecentOrders(Array.isArray(orders) ? orders : []);
+        const firstCurrency = (catalogRows || [])[0]?.currency;
+        if (firstCurrency) setCurrency(firstCurrency);
+      })
+      .catch((err: any) => setBanner(err?.message || "Failed to load storefront data."))
+      .finally(() => setLoading(false));
+  }, [clientId, accessLoading, accessState?.buyer_storefront]);
+
+  const categories = useMemo(
+    () => ["All", ...Array.from(new Set(catalog.map((item) => item.category).filter(Boolean) as string[]))],
+    [catalog],
+  );
+
+  const filteredCatalog = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    return catalog.filter((item) => {
+      const matchesCategory = category === "All" || item.category === category;
+      const matchesSearch =
+        !term ||
+        [item.name, item.sku, item.description, item.details, item.brand, item.category]
+          .filter(Boolean)
+          .some((value) => String(value).toLowerCase().includes(term));
+      return matchesCategory && matchesSearch;
+    });
+  }, [catalog, search, category]);
+
+  const cartTotal = useMemo(() => cart.reduce((sum, item) => sum + item.quantity * item.unit_price, 0), [cart]);
+
+  const branding = portalSettings?.branding || {};
+  const storefrontTitle = branding.storefront_title || "Buyer Portal";
+  const heroHeadline =
+    branding.hero_headline ||
+    "Shop products, submit orders, track fulfillment, and keep buyers informed in one storefront.";
+  const heroDescription =
+    branding.hero_description ||
+    "Buyers can browse a client-specific catalog, add items to cart, enter shipping and payment details, and track the complete purchase flow back to the supplier.";
+  const supportEmail = branding.support_email || "hello@ordanex.ai";
+  const accentColor = branding.accent_color || "#2563eb";
+  const catalogTitle = portalSettings?.catalog?.title || "Catalog";
+  const catalogDescription =
+    portalSettings?.catalog?.description || "Browse approved products, pricing, lead times, and payment expectations.";
+  const commerce = portalSettings?.commerce || {};
+  const payments = portalSettings?.payments || {};
+  const experience = portalSettings?.experience || {};
+  const acceptedMethods = normalizeMethods(portalSettings);
+  const paymentsEnabled = payments.enabled !== false;
+  const paymentMode = String(payments.mode || "INVOICE_LATER").toUpperCase();
+  const paymentProvider = payments.provider_name || "Supplier Direct";
+  const paymentTerms = payments.payment_terms || "Net 30";
+  const paymentLinkUrl = String(payments.payment_link_url || "").trim();
+  const paymentLinkLabel = String(payments.payment_link_label || "Pay supplier").trim() || "Pay supplier";
+  const paymentInstructions =
+    payments.instructions || "Collect payment directly with the supplier using the configured methods.";
+  const paymentProofInstructions =
+    payments.proof_of_payment_instructions || "Share your UTR, transaction id, or payment confirmation after completing payment.";
+  const sellerMode = String(commerce.seller_mode || "ERP_INTEGRATED").toUpperCase();
+  const orderFlowMode = String(commerce.order_flow_mode || "ERP_ORCHESTRATED").toUpperCase();
+  const buyerTrackingMode = String(commerce.buyer_tracking_mode || "LIVE_ERP").toUpperCase();
+  const supplierDisplayName = commerce.supplier_display_name || "Configured Supplier";
+  const showProductSpecs = experience.show_product_specs !== false;
+  const showInventoryStatus = experience.show_inventory_status !== false;
+  const showCheckoutPromises = experience.show_checkout_promises !== false;
+
+  const trackingSteps =
+    Array.isArray(submittedOrder?.tracking_steps) && submittedOrder?.tracking_steps.length
+      ? submittedOrder.tracking_steps
+      : buildTrackingSteps(
+          submittedOrder,
+          sellerMode,
+          paymentsEnabled,
+          submittedOrder?.payment_status ||
+            (paymentsEnabled
+              ? paymentReference
+                ? "Payment captured"
+                : paymentMode === "INVOICE_LATER"
+                  ? "Awaiting supplier invoice"
+                  : paymentMode === "PAYMENT_LINK"
+                    ? "Awaiting payment through secure link"
+                    : "Awaiting payment confirmation"
+              : "Commercial terms handled directly with the supplier"),
+        );
+
+  const galleryMedia = useMemo(
+    () => (galleryProduct ? normalizeMedia(galleryProduct) : []),
+    [galleryProduct],
+  );
+
+  const galleryActiveMedia =
+    galleryMedia.length > 0 ? galleryMedia[Math.min(galleryIndex, galleryMedia.length - 1)] : null;
+
+  function addToCart(item: BuyerPortalCatalogItem) {
+    setCart((current) => {
+      const found = current.find((line) => line.sku === item.sku);
+      if (found) {
+        return current.map((line) => (line.sku === item.sku ? { ...line, quantity: line.quantity + 1 } : line));
+      }
+      return [...current, { ...item, quantity: Math.max(1, Number(item.min_order_qty || 1)) }];
+    });
+  }
+
+  function setLineQuantity(sku: string, quantity: number) {
+    setCart((current) =>
+      current.map((line) =>
+        line.sku === sku ? { ...line, quantity: Math.max(Number(line.min_order_qty || 1), quantity || 1) } : line,
+      ),
+    );
+  }
+
+  function removeFromCart(sku: string) {
+    setCart((current) => current.filter((line) => line.sku !== sku));
+  }
+
+  async function handlePaymentProofChange(file?: File | null) {
+    if (!file) return;
+    if (file.size > MAX_PAYMENT_PROOF_BYTES) {
+      setBanner("Payment proof file is too large. Use a file up to 4MB.");
+      return;
+    }
+    const allowed =
+      file.type === "application/pdf" ||
+      file.type.startsWith("image/") ||
+      /\.(pdf|png|jpe?g|webp)$/i.test(file.name);
+    if (!allowed) {
+      setBanner("Use PDF or image files for proof of payment.");
+      return;
+    }
+    try {
+      const uploaded = await uploadPortalFile({
+        file,
+        clientId: clientId || null,
+        scope: "payment-proof",
+      });
+      setPaymentProofName(uploaded.fileName || file.name);
+      setPaymentProofUrl(uploaded.fileUrl || "");
+      setPaymentProofDataUrl(uploaded.fileDataUrl || "");
+      setBanner(
+        `${uploaded.storageMode === "remote" ? "Uploaded" : "Attached"} payment proof: ${uploaded.fileName || file.name}`,
+      );
+    } catch (err: any) {
+      setBanner(err?.message || "Failed to load payment proof file.");
+    }
+  }
+
+  function openGallery(item: BuyerPortalCatalogItem, mediaIndex = 0) {
+    setGalleryProduct(item);
+    setGalleryIndex(mediaIndex);
+  }
+
+  function closeGallery() {
+    setGalleryProduct(null);
+    setGalleryIndex(0);
+  }
+
+  async function placeOrder() {
+    if (!clientId) {
+      setBanner("Missing client id in the storefront URL.");
+      return;
+    }
+    if (!buyerName.trim() || !buyerEmail.trim() || !cart.length) {
+      setBanner("Please enter your name, email, and at least one item.");
+      return;
+    }
+    setLoading(true);
+    setBanner(null);
+    try {
+      const order = await submitBuyerOrder({
+        client_id: clientId,
+        buyer_name: buyerName,
+        buyer_email: buyerEmail,
+        company_name: companyName || undefined,
+        sold_to: companyName || buyerName,
+        ship_to: shipTo || undefined,
+        ship_to_name: shipTo || companyName || buyerName,
+        ship_to_address: shipToAddress || undefined,
+        currency,
+        notes: notes || undefined,
+        payment_method: paymentsEnabled ? paymentMethod : undefined,
+        payment_reference: paymentReference || undefined,
+        payment_proof_name: paymentProofName || undefined,
+        payment_proof_url: paymentProofUrl || undefined,
+        payment_proof_data_url: paymentProofDataUrl || undefined,
+        items: cart.map(
+          (line): BuyerPortalOrderItem => ({
+            sku: line.sku,
+            name: line.name,
+            description: line.description,
+            quantity: line.quantity,
+            unit_price: line.unit_price,
+            uom: line.uom || "EA",
+          }),
+        ),
+      });
+      const orderWithProof = {
+        ...order,
+        payment_proof_name: order.payment_proof_name || paymentProofName || undefined,
+        payment_proof_url: order.payment_proof_url || paymentProofUrl || undefined,
+        payment_proof_data_url: order.payment_proof_data_url || paymentProofDataUrl || undefined,
+      };
+      setSubmittedOrder(orderWithProof);
+      setCart([]);
+      setPaymentReference("");
+      setPaymentProofName("");
+      setPaymentProofUrl("");
+      setPaymentProofDataUrl("");
+      setBanner(`Order ${order.po_number || order.po_id} submitted successfully.`);
+      const refreshed = await fetchBuyerOrder(order.po_id);
+      setSubmittedOrder({
+        ...refreshed,
+        payment_proof_name: refreshed.payment_proof_name || orderWithProof.payment_proof_name,
+        payment_proof_url: refreshed.payment_proof_url || orderWithProof.payment_proof_url,
+        payment_proof_data_url: refreshed.payment_proof_data_url || orderWithProof.payment_proof_data_url,
+      });
+      const history = await fetchBuyerOrders(clientId, buyerEmail);
+      setRecentOrders(Array.isArray(history) ? history : []);
+    } catch (err: any) {
+      setBanner(err?.message || "Failed to place order.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  if (accessLoading) {
+    return <div style={shell}><div style={{ maxWidth: 1440, margin: "0 auto", padding: "24px 18px 40px", color: "#475569" }}>Loading storefront access and catalog configuration...</div></div>;
+  }
+
+  if (accessState && !accessState.buyer_storefront) {
+    return (
+      <div style={shell}>
+        <div style={{ maxWidth: 1440, margin: "0 auto", padding: "24px 18px 40px" }}>
+          <section style={{ ...panel, padding: 28, display: "grid", gap: 14 }}>
+            <div style={{ fontSize: 22, fontWeight: 800, color: "#0f172a" }}>Storefront not enabled</div>
+            <div style={{ color: "#475569", lineHeight: 1.7 }}>
+              The buyer portal is not enabled for this client yet.
+            </div>
+          </section>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={shell}>
+      <div style={{ maxWidth: 1440, margin: "0 auto", padding: "24px 18px 40px" }}>
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ fontSize: 34, fontWeight: 900, color: "#0f172a" }}>{storefrontTitle}</div>
+          <div style={{ marginTop: 8, color: "#64748b", lineHeight: 1.6 }}>
+            Browse the catalog, place a buyer order, and track supplier and ERP status from one place.
+          </div>
+        </div>
+
+        {banner ? (
+          <div style={{ ...panel, borderColor: "#c7d2fe", background: "#eff6ff", color: "#1d4ed8", padding: 14, marginBottom: 16, fontWeight: 700 }}>
+            {banner}
+          </div>
+        ) : null}
+
+        <section style={{ ...panel, padding: 18, marginBottom: 16 }}>
+          <div style={heroGrid}>
+            <div style={{ ...heroCard, background: `linear-gradient(135deg, ${accentColor} 0%, #1d4ed8 42%, #0f172a 100%)` }}>
+              <div>
+                <div style={heroEyebrow}>Catalog to cash</div>
+                <div style={heroTitle}>{heroHeadline}</div>
+                <p style={heroDescriptionStyle}>{heroDescription}</p>
+              </div>
+              <div style={heroPillRow}>
+                <span style={heroPill}>{sellerMode === "STANDALONE_COMMERCE" ? "Supplier without ERP" : "ERP-integrated supplier"}</span>
+                <span style={heroPill}>{orderFlowMode === "ORDANEX_MANAGED" ? "Ordanex-managed order flow" : "ERP-orchestrated order flow"}</span>
+                <span style={heroPill}>{buyerTrackingMode === "PORTAL_UPDATES" ? "Portal updates" : "Live ERP / fulfillment tracking"}</span>
+                <span style={heroPill}>Support: {supportEmail}</span>
+              </div>
+            </div>
+
+            <div style={{ ...panel, padding: 18, display: "grid", gap: 12 }}>
+              <div style={sectionLabel}>Buyer details</div>
+              <input style={field} placeholder="Buyer name" value={buyerName} onChange={(e) => setBuyerName(e.target.value)} />
+              <input style={field} placeholder="Buyer email" value={buyerEmail} onChange={(e) => setBuyerEmail(e.target.value)} />
+              <input style={field} placeholder="Company name" value={companyName} onChange={(e) => setCompanyName(e.target.value)} />
+              <input style={field} placeholder="Ship-to name" value={shipTo} onChange={(e) => setShipTo(e.target.value)} />
+              <input style={field} placeholder="Ship-to address" value={shipToAddress} onChange={(e) => setShipToAddress(e.target.value)} />
+              <textarea style={{ ...field, minHeight: 96, resize: "vertical" }} placeholder="Order notes" value={notes} onChange={(e) => setNotes(e.target.value)} />
+              <div style={sectionLabel}>Payment setup</div>
+              <select style={field} value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)}>
+                {acceptedMethods.map((method) => <option key={method} value={method}>{method}</option>)}
+              </select>
+              <input style={field} placeholder="Transaction / remittance reference" value={paymentReference} onChange={(e) => setPaymentReference(e.target.value)} />
+              <div style={guidanceBox}>
+                <div style={sectionLabel}>Payment guidance</div>
+                <div style={mutedText}>{paymentInstructions}</div>
+                <div style={{ ...mutedText, marginTop: 6 }}>Terms: {paymentTerms}</div>
+                {paymentMode === "PAYMENT_LINK" && paymentLinkUrl ? (
+                  <a href={paymentLinkUrl} target="_blank" rel="noreferrer" style={linkCta}>
+                    {paymentLinkLabel}
+                  </a>
+                ) : null}
+                {paymentsEnabled ? <div style={{ ...mutedText, marginTop: 6 }}>{paymentProofInstructions}</div> : null}
+              </div>
+              {paymentsEnabled ? (
+                <div style={guidanceBox}>
+                  <div style={sectionLabel}>Proof of payment</div>
+                  <div style={mutedText}>
+                    Upload a payment receipt, screenshot, or PDF so the supplier can verify bank transfer or external payment completion.
+                  </div>
+                  <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 10, alignItems: "center" }}>
+                    <label style={uploadButton}>
+                      Upload proof
+                      <input
+                        type="file"
+                        accept="application/pdf,image/*"
+                        hidden
+                        onChange={(e) => void handlePaymentProofChange(e.target.files?.[0] || null)}
+                      />
+                    </label>
+                    {paymentProofName ? <div style={mutedSmall}>Attached: {paymentProofName}</div> : null}
+                    {paymentProofName ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPaymentProofName("");
+                          setPaymentProofUrl("");
+                          setPaymentProofDataUrl("");
+                        }}
+                        style={ghostButton}
+                      >
+                        Remove proof
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
+              <div style={currencyRow}>
+                <div style={{ flex: "1 1 160px" }}>
+                  <div style={sectionLabel}>Currency</div>
+                  <input style={field} value={currency} onChange={(e) => setCurrency(e.target.value.toUpperCase())} />
+                </div>
+                <button type="button" onClick={placeOrder} disabled={loading || !cart.length} style={primaryButton}>
+                  {loading ? "Placing..." : "Place Order"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <div style={contentGrid}>
+          <section style={{ ...panel, padding: 18 }}>
+            <div style={catalogHeader}>
+              <div>
+                <div style={{ fontSize: 24, fontWeight: 900, color: "#0f172a" }}>{catalogTitle}</div>
+                <div style={mutedText}>{catalogDescription}</div>
+              </div>
+              <input style={{ ...field, width: 280 }} placeholder="Search products" value={search} onChange={(e) => setSearch(e.target.value)} />
+            </div>
+
+            <div style={filterRow}>
+              {categories.map((entry) => (
+                <button
+                  key={entry}
+                  type="button"
+                  onClick={() => setCategory(entry)}
+                  style={{
+                    ...tagButton,
+                    background: category === entry ? "#dbeafe" : "#fff",
+                    color: category === entry ? "#1d4ed8" : "#0f172a",
+                    borderColor: category === entry ? "#93c5fd" : "#dbe2ea",
+                  }}
+                >
+                  {entry}
+                </button>
+              ))}
+            </div>
+
+            {loading && !catalog.length ? <div style={mutedText}>Loading catalog...</div> : null}
+
+            <div style={productGrid}>
+              {filteredCatalog.map((item) => {
+                const media = normalizeMedia(item);
+                const activeIndex = Math.min(
+                  activeMediaBySku[item.sku] ?? 0,
+                  Math.max(0, media.length - 1),
+                );
+                const heroMedia = media[activeIndex] || media[0] || null;
+                return (
+                  <article key={item.sku} style={productCard}>
+                    <div style={productMediaShell}>
+                      {heroMedia ? (
+                        heroMedia.kind === "video" ? (
+                          <div style={productMediaInteractive} onClick={() => openGallery(item, activeIndex)} role="button" tabIndex={0}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" || e.key === " ") {
+                                e.preventDefault();
+                                openGallery(item, activeIndex);
+                              }
+                            }}>
+                            <video src={heroMedia.url} controls style={productVideo} />
+                          </div>
+                        ) : (
+                          <button type="button" style={mediaOpenButton} onClick={() => openGallery(item, activeIndex)}>
+                            <img src={heroMedia.url} alt={item.name} style={productImage} />
+                          </button>
+                        )
+                      ) : (
+                        <div style={productMediaEmpty}>No product media</div>
+                      )}
+                    </div>
+                    <div style={productBody}>
+                      <div style={productTopRow}>
+                        <div>
+                          <div style={productCategory}>{item.category || "Catalog"}</div>
+                          <div style={productTitle}>{item.name}</div>
+                          <div style={productSubline}>
+                            {(item.brand || supplierDisplayName) && `${item.brand || supplierDisplayName} | `}
+                            {item.sku}
+                          </div>
+                        </div>
+                        <div style={productPrice}>{money(item.unit_price, item.currency)}</div>
+                      </div>
+
+                      <div style={productText}>{item.description || item.details}</div>
+
+                      <div style={chipRow}>
+                        {showInventoryStatus ? <span style={inventoryChip(statusColor(item.stock_status))}>{item.stock_status || "Available"}</span> : null}
+                        {item.lead_time && showCheckoutPromises ? <span style={tag}>Lead time: {item.lead_time}</span> : null}
+                        {item.min_order_qty ? <span style={tag}>MOQ {item.min_order_qty} {item.moq_uom || item.uom || ""}</span> : null}
+                        {item.payment_terms ? <span style={tag}>{item.payment_terms}</span> : null}
+                      </div>
+
+                      {showProductSpecs && specsEntries(item.specifications).length ? (
+                        <div style={specGrid}>
+                          {specsEntries(item.specifications).map(([specKey, specValue]) => (
+                            <div key={specKey} style={specRow}>
+                              <span style={specKeyStyle}>{specKey}</span>
+                              <span>{specValue}</span>
+                            </div>
+                          ))}
+                        </div>
+                      ) : null}
+
+                      {media.length > 1 ? (
+                        <div style={thumbRow}>
+                          {media.slice(0, 6).map((entry, index) => (
+                            <button
+                              key={entry.url}
+                              type="button"
+                              style={{
+                                ...thumbFrame,
+                                borderColor: activeIndex === index ? "#2563eb" : "#dbe2ea",
+                                boxShadow: activeIndex === index ? "0 0 0 2px rgba(37, 99, 235, 0.15)" : "none",
+                              }}
+                              onClick={() =>
+                                setActiveMediaBySku((current) => ({
+                                  ...current,
+                                  [item.sku]: index,
+                                }))
+                              }
+                            >
+                              {entry.kind === "video" ? (
+                                <div style={videoThumbLabel}>Video</div>
+                              ) : (
+                                <img src={entry.url} alt={entry.label || item.name} style={thumbImage} />
+                              )}
+                            </button>
+                          ))}
+                        </div>
+                      ) : null}
+
+                      <div style={productBottomRow}>
+                        <div style={mutedSmall}>Supplier: {item.supplier_name || supplierDisplayName}</div>
+                        <button type="button" onClick={() => addToCart(item)} style={darkButton}>
+                          Add to Cart
+                        </button>
+                      </div>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          </section>
+
+          <aside style={{ display: "grid", gap: 16 }}>
+            <section style={{ ...panel, padding: 18 }}>
+              <div style={sideTitle}>Cart</div>
+              {cart.length === 0 ? (
+                <div style={mutedText}>Your cart is empty. Add products from the catalog.</div>
+              ) : (
+                <div style={{ display: "grid", gap: 12 }}>
+                  {cart.map((line) => (
+                    <div key={line.sku} style={cartRow}>
+                      <div style={cartTop}>
+                        <div>
+                          <div style={cartTitle}>{line.name}</div>
+                          <div style={mutedSmall}>{line.sku}</div>
+                        </div>
+                        <button type="button" onClick={() => removeFromCart(line.sku)} style={tagButton}>
+                          Remove
+                        </button>
+                      </div>
+                      <div style={cartBottom}>
+                        <input
+                          type="number"
+                          min={Number(line.min_order_qty || 1)}
+                          value={line.quantity}
+                          onChange={(e) => setLineQuantity(line.sku, Number(e.target.value || 1))}
+                          style={{ ...field, width: 96 }}
+                        />
+                        <div style={cartAmount}>{money(line.quantity * line.unit_price, line.currency)}</div>
+                      </div>
+                    </div>
+                  ))}
+                  <div style={cartTotalRow}>
+                    <span>Total</span>
+                    <span>{money(cartTotal, currency)}</span>
+                  </div>
+                </div>
+              )}
+            </section>
+
+            <section style={{ ...panel, padding: 18 }}>
+              <div style={sideTitle}>Purchase Flow</div>
+              <div style={{ display: "grid", gap: 10 }}>
+                {trackingSteps.map((step) => (
+                  <div key={step.key} style={trackingCard(step.status)}>
+                    <div style={trackingTop}>
+                      <div style={trackingLabel}>{step.label}</div>
+                      <span style={trackingBadge(step.status)}>{step.status.toUpperCase()}</span>
+                    </div>
+                    <div style={trackingDetail}>{step.detail}</div>
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            <section style={{ ...panel, padding: 18 }}>
+              <div style={sideTitle}>Order Status</div>
+              {submittedOrder ? (
+                <div style={{ display: "grid", gap: 10 }}>
+                  <div style={statusHeaderRow}>
+                    <div>
+                      <div style={cartTitle}>{submittedOrder.po_number || submittedOrder.po_id}</div>
+                      <div style={mutedSmall}>Buyer order submitted to {supplierDisplayName}</div>
+                    </div>
+                    <span style={{ ...statusPill, ...statusColor(submittedOrder.status) }}>{submittedOrder.status || "NEW"}</span>
+                  </div>
+                  <div style={mutedText}>Payment: {submittedOrder.payment_status || "Pending"}</div>
+                  <div style={mutedText}>Method: {submittedOrder.payment_method || paymentMethod || paymentProvider}</div>
+                  <div style={mutedText}>Reference: {submittedOrder.payment_reference || "Awaiting buyer update"}</div>
+                  {submittedOrder.payment_proof_name || submittedOrder.payment_proof_url || submittedOrder.payment_proof_data_url ? (
+                    <div style={detailCard}>
+                      <div style={detailTitle}>Payment Proof</div>
+                      <div style={mutedText}>Document: {submittedOrder.payment_proof_name || "Uploaded proof"}</div>
+                      {submittedOrder.payment_proof_url || submittedOrder.payment_proof_data_url ? (
+                        <a
+                          href={submittedOrder.payment_proof_url || submittedOrder.payment_proof_data_url || "#"}
+                          target="_blank"
+                          rel="noreferrer"
+                          style={linkCta}
+                        >
+                          Open payment proof
+                        </a>
+                      ) : null}
+                    </div>
+                  ) : null}
+                  <div style={mutedText}>ERP Dispatch: {submittedOrder.dispatch_status || "Pending"}</div>
+                  <div style={mutedText}>ERP Acknowledgement: {submittedOrder.ack_status || "Pending"}</div>
+                  {submittedOrder.invoice ? (
+                    <div style={detailCard}>
+                      <div style={detailTitle}>Invoice</div>
+                      <div style={mutedText}>Number: {submittedOrder.invoice.invoice_number || "Pending"}</div>
+                      <div style={mutedText}>
+                        Amount: {submittedOrder.invoice.invoice_amount != null ? money(submittedOrder.invoice.invoice_amount, submittedOrder.invoice.currency || currency) : "Pending"}
+                      </div>
+                      <div style={mutedText}>Due date: {submittedOrder.invoice.due_date || "Pending"}</div>
+                      <div style={mutedText}>Payment status: {submittedOrder.invoice.payment_status || submittedOrder.payment_status || "Pending"}</div>
+                      {submittedOrder.invoice.invoice_url ? <a href={submittedOrder.invoice.invoice_url} target="_blank" rel="noreferrer" style={linkCta}>Open invoice</a> : null}
+                    </div>
+                  ) : null}
+                  {submittedOrder.shipment ? (
+                    <div style={detailCard}>
+                      <div style={detailTitle}>Shipment</div>
+                      <div style={mutedText}>Shipment no: {submittedOrder.shipment.shipment_number || "Pending"}</div>
+                      <div style={mutedText}>Status: {submittedOrder.shipment.shipment_status || submittedOrder.dispatch_status || "Pending"}</div>
+                      <div style={mutedText}>Carrier: {submittedOrder.shipment.carrier || "Pending"}</div>
+                      <div style={mutedText}>Tracking no: {submittedOrder.shipment.tracking_number || "Pending"}</div>
+                      <div style={mutedText}>ETA: {submittedOrder.shipment.estimated_delivery_date || "Pending"}</div>
+                      {submittedOrder.shipment.tracking_url ? <a href={submittedOrder.shipment.tracking_url} target="_blank" rel="noreferrer" style={linkCta}>Track shipment</a> : null}
+                    </div>
+                  ) : null}
+                </div>
+              ) : (
+                <div style={mutedText}>Submitted orders will appear here with payment and ERP status updates.</div>
+              )}
+            </section>
+
+            <section style={{ ...panel, padding: 18 }}>
+              <div style={sideTitle}>Recent Orders</div>
+              {recentOrders.length === 0 ? (
+                <div style={mutedText}>Submit an order to start building buyer history.</div>
+              ) : (
+                <div style={{ display: "grid", gap: 10 }}>
+                  {recentOrders.slice(0, 5).map((order) => (
+                    <div key={order.po_id} style={detailCard}>
+                      <div style={statusHeaderRow}>
+                        <div>
+                          <div style={cartTitle}>{order.po_number || order.po_id}</div>
+                          <div style={mutedSmall}>{order.supplier_name || order.client_id}</div>
+                        </div>
+                        <span style={{ ...statusPill, ...statusColor(order.status) }}>{order.status || "NEW"}</span>
+                      </div>
+                      <div style={mutedText}>{order.payment_status || "Payment pending"}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+          </aside>
+        </div>
+      </div>
+      {galleryProduct && galleryActiveMedia ? (
+        <div style={galleryOverlay} onClick={closeGallery}>
+          <div style={galleryDialog} onClick={(e) => e.stopPropagation()}>
+            <div style={galleryHeader}>
+              <div>
+                <div style={galleryTitle}>{galleryProduct.name}</div>
+                <div style={mutedSmall}>
+                  {galleryProduct.sku}
+                  {galleryProduct.category ? ` | ${galleryProduct.category}` : ""}
+                </div>
+              </div>
+              <button type="button" onClick={closeGallery} style={galleryCloseButton}>
+                Close
+              </button>
+            </div>
+            <div style={galleryStage}>
+              {galleryActiveMedia.kind === "video" ? (
+                <video src={galleryActiveMedia.url} controls autoPlay style={galleryVideo} />
+              ) : (
+                <img src={galleryActiveMedia.url} alt={galleryProduct.name} style={galleryImage} />
+              )}
+            </div>
+            {galleryMedia.length > 1 ? (
+              <div style={galleryThumbRow}>
+                {galleryMedia.map((entry, index) => (
+                  <button
+                    key={entry.url}
+                    type="button"
+                    style={{
+                      ...galleryThumb,
+                      borderColor: galleryIndex === index ? "#2563eb" : "#dbe2ea",
+                      boxShadow: galleryIndex === index ? "0 0 0 2px rgba(37, 99, 235, 0.15)" : "none",
+                    }}
+                    onClick={() => setGalleryIndex(index)}
+                  >
+                    {entry.kind === "video" ? (
+                      <div style={galleryVideoLabel}>Video</div>
+                    ) : (
+                      <img src={entry.url} alt={entry.label || galleryProduct.name} style={galleryThumbImage} />
+                    )}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+const shell: React.CSSProperties = {
+  minHeight: "100vh",
+  background:
+    "radial-gradient(circle at top left, rgba(37, 99, 235, 0.08), transparent 30%), radial-gradient(circle at top right, rgba(16, 185, 129, 0.08), transparent 26%), linear-gradient(180deg, #f8fafc 0%, #ffffff 100%)",
+};
+
+const panel: React.CSSProperties = {
+  background: "#fff",
+  border: "1px solid #e5e7eb",
+  borderRadius: 18,
+  boxShadow: "0 16px 48px rgba(15, 23, 42, 0.06)",
+  minWidth: 0,
+  overflow: "hidden",
+};
+
+const field: React.CSSProperties = {
+  width: "100%",
+  maxWidth: "100%",
+  border: "1px solid #dbe2ea",
+  borderRadius: 12,
+  padding: "11px 12px",
+  minHeight: 44,
+  fontSize: 14,
+  lineHeight: 1.4,
+  outline: "none",
+  background: "#fff",
+  boxSizing: "border-box",
+  display: "block",
+  margin: 0,
+};
+
+const primaryButton: React.CSSProperties = {
+  border: "1px solid #0b5fff",
+  background: "#0b5fff",
+  color: "#fff",
+  borderRadius: 12,
+  padding: "12px 16px",
+  fontWeight: 800,
+  cursor: "pointer",
+};
+
+const uploadButton: React.CSSProperties = {
+  border: "1px solid #1d4ed8",
+  background: "#eff6ff",
+  color: "#1d4ed8",
+  borderRadius: 12,
+  padding: "10px 14px",
+  fontWeight: 800,
+  cursor: "pointer",
+  display: "inline-flex",
+  alignItems: "center",
+};
+
+const ghostButton: React.CSSProperties = {
+  border: "1px solid #dbe2ea",
+  background: "#fff",
+  color: "#475569",
+  borderRadius: 12,
+  padding: "10px 14px",
+  fontWeight: 700,
+  cursor: "pointer",
+};
+
+const darkButton: React.CSSProperties = {
+  border: "1px solid #0f172a",
+  background: "#0f172a",
+  color: "#fff",
+  borderRadius: 12,
+  padding: "9px 12px",
+  fontWeight: 800,
+  cursor: "pointer",
+};
+
+const tagButton: React.CSSProperties = {
+  border: "1px solid #dbe2ea",
+  background: "#fff",
+  color: "#0f172a",
+  borderRadius: 999,
+  padding: "8px 12px",
+  fontWeight: 700,
+  cursor: "pointer",
+};
+
+const tag: React.CSSProperties = {
+  borderRadius: 999,
+  padding: "6px 10px",
+  background: "#f8fafc",
+  color: "#334155",
+  fontSize: 12,
+  fontWeight: 700,
+};
+
+const heroGrid: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
+  gap: 16,
+  alignItems: "stretch",
+};
+
+const heroCard: React.CSSProperties = {
+  borderRadius: 18,
+  padding: 24,
+  color: "white",
+  minHeight: 280,
+  display: "flex",
+  flexDirection: "column",
+  justifyContent: "space-between",
+};
+
+const heroEyebrow: React.CSSProperties = {
+  fontSize: 12,
+  fontWeight: 800,
+  letterSpacing: 0.12,
+  textTransform: "uppercase",
+  opacity: 0.9,
+};
+
+const heroTitle: React.CSSProperties = {
+  marginTop: 12,
+  fontSize: 36,
+  lineHeight: 1.05,
+  fontWeight: 900,
+  maxWidth: 640,
+};
+
+const heroDescriptionStyle: React.CSSProperties = {
+  margin: "10px 0 0",
+  maxWidth: 720,
+  fontSize: 15,
+  lineHeight: 1.7,
+  color: "rgba(255,255,255,0.86)",
+};
+
+const heroPillRow: React.CSSProperties = {
+  display: "flex",
+  gap: 10,
+  flexWrap: "wrap",
+  marginTop: 18,
+};
+
+const heroPill: React.CSSProperties = {
+  border: "1px solid rgba(255,255,255,0.2)",
+  borderRadius: 999,
+  padding: "8px 12px",
+  fontSize: 12,
+  fontWeight: 800,
+  letterSpacing: 0.04,
+  background: "rgba(255,255,255,0.08)",
+};
+
+const sectionLabel: React.CSSProperties = {
+  fontSize: 12,
+  fontWeight: 800,
+  color: "#475569",
+  textTransform: "uppercase",
+  letterSpacing: 0.04,
+};
+
+const guidanceBox: React.CSSProperties = {
+  border: "1px solid #dbe2ea",
+  borderRadius: 14,
+  padding: 12,
+  background: "#f8fbff",
+};
+
+const linkCta: React.CSSProperties = {
+  color: "#1d4ed8",
+  fontWeight: 800,
+  fontSize: 13,
+  textDecoration: "none",
+  marginTop: 6,
+  display: "inline-block",
+};
+
+const currencyRow: React.CSSProperties = {
+  display: "flex",
+  gap: 12,
+  alignItems: "end",
+  flexWrap: "wrap",
+};
+
+const contentGrid: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "minmax(0, 1.6fr) minmax(320px, 0.9fr)",
+  gap: 16,
+  alignItems: "start",
+};
+
+const catalogHeader: React.CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  gap: 12,
+  alignItems: "end",
+  flexWrap: "wrap",
+  marginBottom: 14,
+};
+
+const mutedText: React.CSSProperties = {
+  color: "#64748b",
+  lineHeight: 1.6,
+  fontSize: 14,
+};
+
+const mutedSmall: React.CSSProperties = {
+  color: "#64748b",
+  lineHeight: 1.5,
+  fontSize: 12,
+};
+
+const filterRow: React.CSSProperties = {
+  display: "flex",
+  gap: 8,
+  flexWrap: "wrap",
+  marginBottom: 16,
+};
+
+const productGrid: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+  gap: 14,
+};
+
+const productCard: React.CSSProperties = {
+  border: "1px solid #e5e7eb",
+  borderRadius: 16,
+  background: "linear-gradient(180deg, #ffffff 0%, #f8fbff 100%)",
+  display: "grid",
+  overflow: "hidden",
+};
+
+const productMediaShell: React.CSSProperties = {
+  minHeight: 200,
+  background: "linear-gradient(135deg, #dbeafe 0%, #eff6ff 100%)",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+};
+
+const productMediaInteractive: React.CSSProperties = {
+  width: "100%",
+  display: "block",
+  cursor: "pointer",
+};
+
+const mediaOpenButton: React.CSSProperties = {
+  border: "none",
+  background: "transparent",
+  padding: 0,
+  margin: 0,
+  width: "100%",
+  display: "block",
+  cursor: "zoom-in",
+};
+
+const productImage: React.CSSProperties = {
+  width: "100%",
+  height: 220,
+  objectFit: "cover",
+  display: "block",
+};
+
+const productVideo: React.CSSProperties = {
+  width: "100%",
+  maxHeight: 260,
+  display: "block",
+  background: "#0f172a",
+};
+
+const productMediaEmpty: React.CSSProperties = {
+  color: "#64748b",
+  fontSize: 13,
+  fontWeight: 700,
+};
+
+const productBody: React.CSSProperties = {
+  display: "grid",
+  gap: 12,
+  padding: 16,
+};
+
+const productTopRow: React.CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  gap: 12,
+  alignItems: "start",
+};
+
+const productCategory: React.CSSProperties = {
+  fontSize: 12,
+  fontWeight: 800,
+  color: "#2563eb",
+  textTransform: "uppercase",
+  letterSpacing: 0.08,
+};
+
+const productTitle: React.CSSProperties = {
+  fontSize: 20,
+  fontWeight: 900,
+  color: "#0f172a",
+  marginTop: 4,
+};
+
+const productSubline: React.CSSProperties = {
+  marginTop: 4,
+  fontSize: 12,
+  color: "#64748b",
+};
+
+const productPrice: React.CSSProperties = {
+  fontWeight: 900,
+  color: "#0f172a",
+  whiteSpace: "nowrap",
+};
+
+const productText: React.CSSProperties = {
+  color: "#475569",
+  fontSize: 13,
+  lineHeight: 1.6,
+};
+
+const chipRow: React.CSSProperties = {
+  display: "flex",
+  gap: 8,
+  flexWrap: "wrap",
+};
+
+const inventoryChip = (colors: { bg: string; fg: string }): React.CSSProperties => ({
+  ...tag,
+  background: colors.bg,
+  color: colors.fg,
+});
+
+const specGrid: React.CSSProperties = {
+  display: "grid",
+  gap: 6,
+};
+
+const specRow: React.CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  gap: 10,
+  fontSize: 12,
+  color: "#475569",
+};
+
+const specKeyStyle: React.CSSProperties = {
+  fontWeight: 700,
+  color: "#0f172a",
+};
+
+const thumbRow: React.CSSProperties = {
+  display: "flex",
+  gap: 8,
+  flexWrap: "wrap",
+};
+
+const thumbFrame: React.CSSProperties = {
+  width: 64,
+  height: 64,
+  borderRadius: 10,
+  overflow: "hidden",
+  border: "1px solid #dbe2ea",
+  background: "#fff",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  padding: 0,
+  cursor: "pointer",
+};
+
+const thumbImage: React.CSSProperties = {
+  width: "100%",
+  height: "100%",
+  objectFit: "cover",
+};
+
+const videoThumbLabel: React.CSSProperties = {
+  fontSize: 11,
+  fontWeight: 800,
+  color: "#1d4ed8",
+};
+
+const productBottomRow: React.CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  gap: 8,
+};
+
+const sideTitle: React.CSSProperties = {
+  fontSize: 18,
+  fontWeight: 900,
+  color: "#0f172a",
+  marginBottom: 10,
+};
+
+const cartRow: React.CSSProperties = {
+  border: "1px solid #e5e7eb",
+  borderRadius: 14,
+  padding: 12,
+  background: "#fff",
+};
+
+const cartTop: React.CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  gap: 10,
+};
+
+const cartTitle: React.CSSProperties = {
+  fontWeight: 900,
+  color: "#0f172a",
+};
+
+const cartBottom: React.CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  marginTop: 10,
+  gap: 10,
+};
+
+const cartAmount: React.CSSProperties = {
+  fontWeight: 900,
+  color: "#0f172a",
+};
+
+const cartTotalRow: React.CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  fontSize: 16,
+  fontWeight: 900,
+};
+
+const trackingCard = (status: TrackingStep["status"]): React.CSSProperties => ({
+  border: "1px solid #e5e7eb",
+  borderRadius: 14,
+  padding: 12,
+  background: status === "complete" ? "#f0fdf4" : status === "active" ? "#eff6ff" : "#fff",
+});
+
+const trackingTop: React.CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  gap: 10,
+  alignItems: "center",
+};
+
+const trackingLabel: React.CSSProperties = {
+  fontWeight: 900,
+  color: "#0f172a",
+};
+
+const trackingBadge = (status: TrackingStep["status"]): React.CSSProperties => ({
+  fontSize: 11,
+  fontWeight: 800,
+  borderRadius: 999,
+  padding: "5px 9px",
+  background: status === "complete" ? "#dcfce7" : status === "active" ? "#dbeafe" : "#f8fafc",
+  color: status === "complete" ? "#166534" : status === "active" ? "#1d4ed8" : "#475569",
+});
+
+const trackingDetail: React.CSSProperties = {
+  marginTop: 6,
+  fontSize: 12,
+  color: "#475569",
+  lineHeight: 1.5,
+};
+
+const statusHeaderRow: React.CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  gap: 10,
+  alignItems: "center",
+};
+
+const statusPill: React.CSSProperties = {
+  fontSize: 12,
+  fontWeight: 800,
+  padding: "6px 10px",
+  borderRadius: 999,
+};
+
+const detailCard: React.CSSProperties = {
+  border: "1px solid #e5e7eb",
+  borderRadius: 14,
+  padding: 12,
+  background: "#f8fbff",
+  display: "grid",
+  gap: 6,
+};
+
+const detailTitle: React.CSSProperties = {
+  fontWeight: 900,
+  color: "#0f172a",
+};
+
+const galleryOverlay: React.CSSProperties = {
+  position: "fixed",
+  inset: 0,
+  background: "rgba(15, 23, 42, 0.72)",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  padding: 24,
+  zIndex: 1000,
+};
+
+const galleryDialog: React.CSSProperties = {
+  width: "min(1100px, 100%)",
+  maxHeight: "90vh",
+  overflow: "auto",
+  borderRadius: 24,
+  background: "#fff",
+  boxShadow: "0 30px 80px rgba(15, 23, 42, 0.35)",
+  padding: 20,
+  display: "grid",
+  gap: 16,
+};
+
+const galleryHeader: React.CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  gap: 12,
+  alignItems: "start",
+};
+
+const galleryTitle: React.CSSProperties = {
+  fontSize: 24,
+  fontWeight: 900,
+  color: "#0f172a",
+};
+
+const galleryCloseButton: React.CSSProperties = {
+  border: "1px solid #dbe2ea",
+  background: "#fff",
+  color: "#0f172a",
+  borderRadius: 12,
+  padding: "10px 14px",
+  fontWeight: 800,
+  cursor: "pointer",
+};
+
+const galleryStage: React.CSSProperties = {
+  borderRadius: 18,
+  overflow: "hidden",
+  background: "#0f172a",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  minHeight: 320,
+};
+
+const galleryImage: React.CSSProperties = {
+  width: "100%",
+  maxHeight: "70vh",
+  objectFit: "contain",
+  display: "block",
+  background: "#0f172a",
+};
+
+const galleryVideo: React.CSSProperties = {
+  width: "100%",
+  maxHeight: "70vh",
+  display: "block",
+  background: "#0f172a",
+};
+
+const galleryThumbRow: React.CSSProperties = {
+  display: "flex",
+  gap: 10,
+  flexWrap: "wrap",
+};
+
+const galleryThumb: React.CSSProperties = {
+  width: 88,
+  height: 88,
+  borderRadius: 12,
+  overflow: "hidden",
+  border: "1px solid #dbe2ea",
+  background: "#fff",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  padding: 0,
+  cursor: "pointer",
+};
+
+const galleryThumbImage: React.CSSProperties = {
+  width: "100%",
+  height: "100%",
+  objectFit: "cover",
+  display: "block",
+};
+
+const galleryVideoLabel: React.CSSProperties = {
+  fontSize: 12,
+  fontWeight: 800,
+  color: "#1d4ed8",
+};

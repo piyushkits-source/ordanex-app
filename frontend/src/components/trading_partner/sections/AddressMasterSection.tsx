@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { TradingPartner } from "types/tradingPartner";
+import { apiFetch, parseApiError } from "utils/api";
 
 const API_BASE = "/address-master";
 
@@ -22,6 +23,7 @@ export default function AddressMasterSection({
     address_line1: "",
     city: "",
     country: "",
+    role_code: "",
     ship_to_code: "",
     sold_to_code: "",
   });
@@ -69,6 +71,7 @@ export default function AddressMasterSection({
         address_line1: "",
         city: "",
         country: "",
+        role_code: "",
         ship_to_code: "",
         sold_to_code: "",
       });
@@ -155,6 +158,56 @@ export default function AddressMasterSection({
     setPreviewResult(data);
   }
 
+  async function syncFromErp() {
+    try {
+      const res = await apiFetch(`/client-config/sync/${partner.client_id}/ADDRESS`, {
+        method: "POST",
+      });
+      if (!res.ok) {
+        throw new Error(await parseApiError(res));
+      }
+      const data = await res.json();
+      onBanner(`Address sync completed. Records synced: ${data.records_synced ?? 0}`);
+      await loadRows();
+    } catch (err: any) {
+      onBanner(err?.message || "Unable to sync address master from ERP.");
+    }
+  }
+
+  const roleLabels: Record<string, string> = {
+    SHIP_TO: "Ship To",
+    SOLD_TO: "Sold To",
+    BILL_TO: "Bill To",
+    REMIT_TO: "Remit To",
+    SUPPLIER: "Supplier",
+    WAREHOUSE: "Warehouse",
+    DELIVERY_LOCATION: "Delivery Location",
+  };
+
+  const formatRole = (value: unknown) => {
+    const key = String(value || "").trim().toUpperCase();
+    return roleLabels[key] || key || "-";
+  };
+
+  const formatCodes = (row: any) => {
+    const entries: Array<[string, unknown]> = [
+      ["Ship To", row.ship_to_code],
+      ["Sold To", row.sold_to_code],
+      ["Bill To", row.bill_to_code],
+      ["Remit To", row.remit_to_code],
+      ["Supplier", row.supplier_code],
+      ["Warehouse", row.warehouse_code],
+      ["Delivery", row.delivery_location_code],
+    ];
+    const parts = entries
+      .map(([label, value]) => {
+        const text = String(value || "").trim();
+        return text ? `${label}: ${text}` : "";
+      })
+      .filter(Boolean);
+    return parts.length ? parts.join(" • ") : "—";
+  };
+
   return (
     <div style={page}>
       <div style={title}>Address Master</div>
@@ -188,6 +241,22 @@ export default function AddressMasterSection({
               setForm({ ...form, country: e.target.value })
             }
           />
+          <select
+            style={input}
+            value={form.role_code}
+            onChange={(e) =>
+              setForm({ ...form, role_code: e.target.value })
+            }
+          >
+            <option value="">Role / Address Type</option>
+            <option value="SHIP_TO">Ship To</option>
+            <option value="SOLD_TO">Sold To</option>
+            <option value="BILL_TO">Bill To</option>
+            <option value="REMIT_TO">Remit To</option>
+            <option value="SUPPLIER">Supplier</option>
+            <option value="WAREHOUSE">Warehouse</option>
+            <option value="DELIVERY_LOCATION">Delivery Location</option>
+          </select>
           <input
             style={input}
             placeholder="Ship To"
@@ -226,6 +295,12 @@ export default function AddressMasterSection({
               setFile(e.target.files?.[0] || null)
             }
           />
+
+          <button style={secondaryBtn} onClick={() => void syncFromErp()}>
+            Sync from ERP
+          </button>
+
+
 
           <button style={primaryBtn} onClick={uploadFile}>
             Upload
@@ -273,6 +348,7 @@ export default function AddressMasterSection({
           <thead>
             <tr>
               <th style={th}>Address</th>
+              <th style={th}>Role</th>
               <th style={th}>City</th>
               <th style={th}>Country</th>
               <th style={th}>Codes</th>
@@ -283,22 +359,20 @@ export default function AddressMasterSection({
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={5}>Loading...</td>
+                <td colSpan={6}>Loading...</td>
               </tr>
             ) : rows.length === 0 ? (
               <tr>
-                <td colSpan={5}>No records</td>
+                <td colSpan={6}>No records</td>
               </tr>
             ) : (
               rows.map((r) => (
                 <tr key={r.address_id}>
                   <td style={td}>{r.address_line1}</td>
+                  <td style={td}>{formatRole(r.role_code)}</td>
                   <td style={td}>{r.city}</td>
                   <td style={td}>{r.country}</td>
-                  <td style={td}>
-                    {r.ship_to_code || "-"} /{" "}
-                    {r.sold_to_code || "-"}
-                  </td>
+                  <td style={td}>{formatCodes(r)}</td>
                   <td style={td}>
                     <button
                       style={secondaryBtn}
@@ -309,8 +383,7 @@ export default function AddressMasterSection({
                   </td>
                 </tr>
               ))
-            )}
-          </tbody>
+            )}          </tbody>
         </table>
       </div>
     </div>

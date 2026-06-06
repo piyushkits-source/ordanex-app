@@ -32,6 +32,9 @@ export default function UserMenu() {
   const auth = getAuth();
   const { scope } = useAppScope();
   const environment = scope.environment ? workspaceEnvironmentBadge(scope.environment) : getFrontendEnvironmentLabel();
+  const activeClientId = auth?.client_id || scope.clientId;
+  const storefrontPath =
+    activeClientId && canAccessModule(auth, "buyer_storefront") ? `/portal/${activeClientId}` : "";
 
   useEffect(() => {
     const close = (event: MouseEvent) => {
@@ -85,6 +88,23 @@ export default function UserMenu() {
           </div>
 
           <div style={{ display: "grid", gap: 4 }}>
+            {storefrontPath ? (
+              <Link
+                to={storefrontPath}
+                onClick={() => setOpen(false)}
+                style={{
+                  ...menuItemStyle,
+                  background: "#eff6ff",
+                  color: "#1d4ed8",
+                  border: "1px solid #bfdbfe",
+                }}
+              >
+                <span style={{ color: "#1d4ed8", width: 16, display: "inline-flex", justifyContent: "center" }}>
+                  <FaFileAlt />
+                </span>
+                <span>Buyer Storefront</span>
+              </Link>
+            ) : null}
             {visibleItems.map((item) => {
               const active = location.pathname === item.path;
               return (

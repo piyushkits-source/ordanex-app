@@ -57,3 +57,14 @@ export type PartnerConnection = {
   created_at?: string;
   updated_at?: string;
 };
+
+export type NotificationRow = {
+  notification_id?: string;
+  partner_id: string;
+  email: string;
+  notification_type: string;
+  include_attachment: boolean;
+  is_active: boolean;
+  created_at?: string;
+  updated_at?: string;
+};

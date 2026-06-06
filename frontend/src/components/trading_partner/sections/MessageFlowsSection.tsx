@@ -1,7 +1,65 @@
 import React, { useEffect, useState } from "react";
+import { integrationPresets } from "../integrationPresets";
 import { TradingPartner } from "types/tradingPartner";
 
 const API_BASE = "/message-flows";
+
+function formatPresetCategory(category: string) {
+  return category.split("_").join(" ");
+}
+
+function buildFlowPreset(partner: TradingPartner, preset: (typeof integrationPresets)[number]): MessageFlowRow {
+  const onboarding = preset.onboarding;
+  const isInvoice = /invoice/i.test(onboarding.message_family) || /invoice/i.test(onboarding.target_message_family) || /invoice/i.test(preset.title);
+  const targetErp =
+    preset.vendor === "SAP"
+      ? "SAP"
+      : preset.vendor === "Oracle"
+        ? "ORACLE"
+        : preset.vendor === "Dynamics 365"
+          ? "D365"
+          : preset.vendor === "NetSuite"
+            ? "NETSUITE"
+            : "GENERIC";
+
+  return {
+    ...defaultFlow(partner),
+    flow_name: `${partner.partner_name} - ${preset.vendor} ${preset.title}`,
+    document_type: isInvoice ? "INVOICE" : onboarding.message_family === "ORDERS" ? "PO" : onboarding.message_family,
+    message_direction: onboarding.direction === "OUTBOUND" ? "OUTBOUND" : "INBOUND",
+    source_format:
+      onboarding.message_standard === "IDOC"
+        ? "IDOC"
+        : onboarding.message_standard === "EDIFACT"
+          ? "EDIFACT"
+          : onboarding.message_standard === "XML"
+            ? "XML"
+            : onboarding.message_standard === "JSON"
+              ? "JSON"
+              : preset.connection.connection_type === "API"
+                ? "API"
+                : preset.connection.connection_type === "VAN"
+                  ? "EDIFACT"
+                  : preset.connection.connection_type,
+    source_message_standard: onboarding.message_standard,
+    source_message_type: onboarding.target_message_family,
+    source_message_version: onboarding.message_version || "",
+    target_erp: targetErp,
+    target_message_standard: preset.connection.message_version || onboarding.message_standard,
+    target_message_type: onboarding.target_message_family,
+    target_message_version: onboarding.message_version || "",
+    target_connection_id: "",
+    mapping_profile_id: "",
+    rule_profile_id: "",
+    uom_profile_id: "",
+    address_profile_id: "",
+    parser_profile_id: "",
+    validation_profile_id: "",
+    auto_send_on_success: true,
+    requires_review_on_error: true,
+    allow_partial_processing: false,
+  };
+}
 
 type MessageFlowRow = {
   flow_id?: string;
@@ -212,6 +270,72 @@ export default function MessageFlowsSection({
       <div style={subTitle}>
         Configure client-specific execution flows by combining document type, source format, target ERP/message version,
         connection, and reusable setup references like mapping, rules, UOM, address, parser, and validation profiles.
+      </div>
+
+      <div style={presetPanel}>
+        <div style={sectionTitle}>Prebuilt Flow Presets</div>
+        <div style={subTitle}>
+          Start a new message flow from a customer portal or native ERP template, then fine-tune the connection, routing,
+          and profiles for the partner.
+        </div>
+        <div style={presetGrid}>
+          <div style={presetColumn}>
+            <div style={presetColumnTitle}>Customer Portals</div>
+            <div style={presetCardGrid}>
+              {integrationPresets
+                .filter((preset) => preset.category === "SELL_SIDE_PORTAL" || preset.category === "BUY_SIDE_PORTAL")
+                .map((preset) => (
+                  <div key={preset.id} style={presetCard}>
+                    <div style={presetBadge}>{formatPresetCategory(preset.category)}</div>
+                    <div style={presetVendor}>{preset.vendor}</div>
+                    <div style={presetName}>{preset.title}</div>
+                    <div style={presetSummary}>{preset.summary}</div>
+                    <div style={presetMeta}>
+                      {preset.onboarding.message_family} • {preset.onboarding.message_standard} • {preset.onboarding.direction}
+                    </div>
+                    <div style={presetChipRow}>
+                      {preset.supportedMessages.map((msg) => (
+                        <span key={`${preset.id}-${msg}`} style={presetChip}>
+                          {msg}
+                        </span>
+                      ))}
+                    </div>
+                    <button type="button" style={secondaryButton} onClick={() => setForm(buildFlowPreset(partner, preset))}>
+                      Use preset
+                    </button>
+                  </div>
+                ))}
+            </div>
+          </div>
+          <div style={presetColumn}>
+            <div style={presetColumnTitle}>Native ERP / Network Integrations</div>
+            <div style={presetCardGrid}>
+              {integrationPresets
+                .filter((preset) => preset.category === "NATIVE_ERP" || preset.category === "NETWORK")
+                .map((preset) => (
+                  <div key={preset.id} style={presetCard}>
+                    <div style={presetBadge}>{formatPresetCategory(preset.category)}</div>
+                    <div style={presetVendor}>{preset.vendor}</div>
+                    <div style={presetName}>{preset.title}</div>
+                    <div style={presetSummary}>{preset.summary}</div>
+                    <div style={presetMeta}>
+                      {preset.onboarding.message_family} • {preset.onboarding.message_standard} • {preset.onboarding.direction}
+                    </div>
+                    <div style={presetChipRow}>
+                      {preset.supportedMessages.map((msg) => (
+                        <span key={`${preset.id}-${msg}`} style={presetChip}>
+                          {msg}
+                        </span>
+                      ))}
+                    </div>
+                    <button type="button" style={secondaryButton} onClick={() => setForm(buildFlowPreset(partner, preset))}>
+                      Use preset
+                    </button>
+                  </div>
+                ))}
+            </div>
+          </div>
+        </div>
       </div>
 
       <div style={card}>
@@ -628,6 +752,64 @@ const sectionTitle: React.CSSProperties = {
   marginTop: 4,
 };
 
+const presetPanel: React.CSSProperties = {
+  marginTop: 16,
+  border: "1px solid #dbe4ee",
+  borderRadius: 14,
+  background: "linear-gradient(180deg, #f8fbff 0%, #ffffff 100%)",
+  padding: 14,
+};
+
+const presetGrid: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))",
+  gap: 12,
+};
+
+const presetColumn: React.CSSProperties = {
+  display: "grid",
+  gap: 10,
+};
+
+const presetColumnTitle: React.CSSProperties = {
+  fontSize: 13,
+  fontWeight: 800,
+  color: "#0f172a",
+};
+
+const presetCardGrid: React.CSSProperties = {
+  display: "grid",
+  gap: 12,
+};
+
+const presetCard: React.CSSProperties = {
+  border: "1px solid #e5e7eb",
+  borderRadius: 12,
+  background: "#fff",
+  padding: 12,
+  display: "grid",
+  gap: 8,
+  alignContent: "start",
+};
+
+const presetBadge: React.CSSProperties = {
+  width: "fit-content",
+  padding: "3px 8px",
+  borderRadius: 999,
+  background: "#dbeafe",
+  color: "#1d4ed8",
+  fontSize: 11,
+  fontWeight: 800,
+  letterSpacing: 0.2,
+};
+
+const presetVendor: React.CSSProperties = { fontSize: 13, fontWeight: 800, color: "#0f172a" };
+const presetName: React.CSSProperties = { fontSize: 12, color: "#334155", fontWeight: 700 };
+const presetSummary: React.CSSProperties = { fontSize: 12, color: "#64748b", lineHeight: 1.5 };
+const presetMeta: React.CSSProperties = { fontSize: 11, color: "#475569", fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.3 };
+const presetChipRow: React.CSSProperties = { display: "flex", flexWrap: "wrap", gap: 6 };
+const presetChip: React.CSSProperties = { padding: "4px 8px", borderRadius: 999, background: "#f1f5f9", color: "#334155", fontSize: 11, fontWeight: 700 };
+
 const grid4: React.CSSProperties = {
   display: "grid",
   gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
@@ -747,3 +929,4 @@ const tdEmptyStyle: React.CSSProperties = {
   color: "#64748b",
   borderBottom: "1px solid #eef2f7",
 };
+

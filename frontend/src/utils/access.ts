@@ -10,7 +10,8 @@ export type AppModuleKey =
   | "reports"
   | "analytics"
   | "bulk_onboarding"
-  | "agentic_support";
+  | "agentic_support"
+  | "buyer_storefront";
 
 const ROLE_ACCESS: Record<string, AppModuleKey[]> = {
   super_admin: [
@@ -24,12 +25,14 @@ const ROLE_ACCESS: Record<string, AppModuleKey[]> = {
     "analytics",
     "bulk_onboarding",
     "agentic_support",
+    "buyer_storefront",
   ],
   client_admin: [
     "trading_partners",
     "users",
     "reports",
     "analytics",
+    "buyer_storefront",
   ],
   it_admin: [
     "monitoring",
@@ -52,6 +55,7 @@ const SUBSCRIPTION_ACCESS: Record<string, AppModuleKey[]> = {
     "users",
     "reports",
     "analytics",
+    "buyer_storefront",
   ],
   premium: [
     "monitoring",
@@ -62,6 +66,7 @@ const SUBSCRIPTION_ACCESS: Record<string, AppModuleKey[]> = {
     "analytics",
     "bulk_onboarding",
     "agentic_support",
+    "buyer_storefront",
   ],
 };
 
@@ -83,6 +88,13 @@ export function canAccessModule(auth: AuthUser | null | undefined, moduleKey: Ap
   if (!roleAllowed) return false;
 
   if (role === "super_admin") return true;
+
+  const featureFlags = Array.isArray(auth.feature_flags) ? auth.feature_flags.map((flag) => String(flag || "").trim().toLowerCase()) : [];
+  const disabledFeatureFlags = Array.isArray((auth as any).disabled_feature_flags)
+    ? (auth as any).disabled_feature_flags.map((flag: string) => String(flag || "").trim().toLowerCase())
+    : [];
+  if (disabledFeatureFlags.includes(moduleKey)) return false;
+  if (featureFlags.includes(moduleKey)) return true;
 
   if (!subscription) return true;
   const subscriptionAllowed = (SUBSCRIPTION_ACCESS[subscription] || []).includes(moduleKey);

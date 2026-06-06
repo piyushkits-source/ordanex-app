@@ -10,6 +10,9 @@ export type AuthUser = {
   environment?: string | null;
   subscription_type?: string | null;
   client_name?: string | null;
+  feature_flags?: string[];
+  disabled_feature_flags?: string[];
+  disabled_feature_flags?: string[];
 };
 
 const AUTH_STORAGE_KEY = "ordanex_auth";

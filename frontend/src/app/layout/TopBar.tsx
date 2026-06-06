@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
-import { useLocation } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import UserMenu from "../../components/common/UserMenu";
 import { getFrontendEnvironmentLabel, workspaceEnvironmentBadge } from "../../utils/environment";
 import { apiFetch } from "../../utils/api";
 import { useAppScope } from "../../context/AppScopeContext";
+import { getAuth } from "../../utils/auth";
+import { canAccessModule } from "../../utils/access";
 
 function getPageTitle(pathname: string) {
   if (pathname.startsWith("/client-config"))     return "Client Configuration";
@@ -22,7 +24,12 @@ export default function TopBar() {
   const location = useLocation();
   const title = getPageTitle(location.pathname);
   const { scope } = useAppScope();
+  const auth = getAuth();
+  const navigate = useNavigate();
   const [environment, setEnvironment] = useState(getFrontendEnvironmentLabel());
+  const activeClientId = auth?.client_id || scope.clientId;
+  const storefrontPath =
+    activeClientId && canAccessModule(auth, "buyer_storefront") ? `/portal/${activeClientId}` : "";
 
   useEffect(() => {
     if (scope.environment) {
@@ -76,7 +83,28 @@ export default function TopBar() {
         </div>
       </div>
 
-      <UserMenu />
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        {storefrontPath ? (
+          <button
+            type="button"
+            onClick={() => navigate(storefrontPath)}
+            style={{
+              border: "1px solid rgba(255,255,255,0.35)",
+              background: "rgba(255,255,255,0.12)",
+              color: "#fff",
+              borderRadius: 999,
+              padding: "8px 14px",
+              cursor: "pointer",
+              fontWeight: 800,
+              minHeight: 48,
+              fontSize: 13,
+            }}
+          >
+            Open storefront
+          </button>
+        ) : null}
+        <UserMenu />
+      </div>
     </div>
   );
 }

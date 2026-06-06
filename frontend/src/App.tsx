@@ -7,6 +7,9 @@ import LoginPage from "./pages/LoginPage";
 import UsersPage from "./pages/UsersPage";
 import ReportsPage from "./pages/ReportsPage";
 import AnalyticsPage from "./pages/AnalyticsPage";
+import BuyerPortalPage from "./pages/BuyerPortalPage";
+import SupplierOrdersPage from "./pages/SupplierOrdersPage";
+import SupplierCommerceDeskPage from "./pages/SupplierCommerceDeskPage";
 import ProtectedRoute from "./components/auth/ProtectedRoute";
 import PublicRoute from "./components/auth/PublicRoute";
 import AccessRoute from "./components/auth/AccessRoute";
@@ -52,6 +55,8 @@ export default function App() {
         }
       />
 
+      <Route path="/portal/:clientId" element={<BuyerPortalPage />} />
+
       <Route
         element={
           <ProtectedRoute>
@@ -70,6 +75,8 @@ export default function App() {
         <Route path="/business-rules" element={<AccessRoute moduleKey="business_rules"><Placeholder title="Business Rules" /></AccessRoute>} />
         <Route path="/reports" element={<AccessRoute moduleKey="reports"><ReportsPage /></AccessRoute>} />
         <Route path="/analytics" element={<AccessRoute moduleKey="analytics"><AnalyticsPage /></AccessRoute>} />
+        <Route path="/supplier/:clientId/orders" element={<AccessRoute moduleKey="client_config"><SupplierOrdersPage /></AccessRoute>} />
+        <Route path="/supplier/orders/:poId/commerce" element={<AccessRoute moduleKey="client_config"><SupplierCommerceDeskPage /></AccessRoute>} />
       </Route>
 
       <Route path="*" element={<Navigate to="/" replace />} />

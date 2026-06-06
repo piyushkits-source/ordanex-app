@@ -346,14 +346,17 @@ export default function ExpandedMessageRow({
         fallbackMappingValue("currency_code", ""),
       ship_to_code:
         (row as any).ship_to_partner?.code ??
+        (row as any).ship_to ??
         fallbackHeaderValue("ship_to_code", "ship_to_id") ??
         fallbackMappingValue("ship_to_code", ""),
       ship_to_name:
         (row as any).ship_to_partner?.name ??
+        (row as any).ship_to_name ??
         fallbackHeaderValue("ship_to_name") ??
         fallbackMappingValue("ship_to_name", ""),
       ship_to_address:
         (row as any).ship_to_partner?.address ??
+        (row as any).ship_to_address ??
         fallbackHeaderValue("ship_to_address") ??
         fallbackMappingValue("ship_to_address", ""),
       header_details: headerDetailsText || fallbackMappingValue("header_details", ""),
@@ -365,16 +368,23 @@ export default function ExpandedMessageRow({
       return aNo - bNo;
     });
 
-    const normalizedItems = sourceItems.map((item, idx) => ({
-      ...item,
-      line_no:
-        item?.line_no === undefined ||
-        item?.line_no === null ||
-        String(item.line_no).trim() === "" ||
-        Number(item.line_no) <= 0
-          ? idx + 1
-          : Number(item.line_no),
-    }));
+    const normalizedItems = sourceItems.map((item, idx) => {
+      const mappedDeliveryDate = fallbackMappingValue(`items.${idx}.delivery_date`, "");
+      return {
+        ...item,
+        delivery_date:
+          mappedDeliveryDate ||
+          item?.delivery_date ||
+          "",
+        line_no:
+          item?.line_no === undefined ||
+          item?.line_no === null ||
+          String(item.line_no).trim() === "" ||
+          Number(item.line_no) <= 0
+            ? idx + 1
+            : Number(item.line_no),
+      };
+    });
 
     setItemsDraft(normalizedItems);
     bboxDraftRef.current = {};
@@ -383,7 +393,7 @@ export default function ExpandedMessageRow({
     setDirtyHeaderFields({});
     setDirtyItemFields({});
     setDirtyMappings({});
-  }, [row.po_id, row]);
+  }, [row.po_id]);
   const mergedMappings: MappingField[] = useMemo(() => {
     const merged: MappingField[] = [...baseMappings];
 
