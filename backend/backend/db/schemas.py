@@ -281,6 +281,19 @@ class LoginResponse(BaseModel):
     disabled_feature_flags: list[str] = Field(default_factory=list)
     disabled_feature_flags: list[str] = Field(default_factory=list)
 
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str = Field(min_length=8, max_length=128)
+
+
+class MessageResponse(BaseModel):
+    message: str
+
 # =========================================================
 # MAPPINGS
 # =========================================================

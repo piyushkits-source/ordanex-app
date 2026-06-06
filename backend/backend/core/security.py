@@ -15,6 +15,7 @@ JWT_SECRET_KEY = os.getenv(
 )
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRE_MINUTES = 8 * 60
+PASSWORD_RESET_EXPIRE_MINUTES = int(os.getenv("PASSWORD_RESET_EXPIRE_MINUTES", "30"))
 
 
 def hash_password(password: str) -> str:
@@ -31,6 +32,24 @@ def create_access_token(data: dict[str, Any], expires_minutes: int = JWT_EXPIRE_
     expire = datetime.now(timezone.utc) + timedelta(minutes=expires_minutes)
     to_encode.update({"iat": issued_at, "exp": expire})
     return jwt.encode(to_encode, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
+
+
+def create_password_reset_token(email: str, environment: str, expires_minutes: int = PASSWORD_RESET_EXPIRE_MINUTES) -> str:
+    return create_access_token(
+        {
+            "sub": email,
+            "environment": environment,
+            "purpose": "password_reset",
+        },
+        expires_minutes=expires_minutes,
+    )
+
+
+def decode_password_reset_token(token: str) -> dict[str, Any]:
+    payload = decode_access_token(token)
+    if payload.get("purpose") != "password_reset":
+        raise jwt.InvalidTokenError("Invalid password reset token")
+    return payload
 
 
 def decode_access_token(token: str) -> dict[str, Any]:

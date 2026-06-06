@@ -14,18 +14,40 @@ export default function LoginPage() {
   const [password, setPassword] = useState("Admin@123");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [showResetRequest, setShowResetRequest] = useState(false);
+  const [resetEmail, setResetEmail] = useState("admin@ordanex.com");
+  const [resetLoading, setResetLoading] = useState(false);
+  const [resetMessage, setResetMessage] = useState("");
 
   const nextPath = useMemo(() => {
     const params = new URLSearchParams(location.search);
     return params.get("next");
   }, [location.search]);
 
-  function handleForgotPassword() {
-    const subject = encodeURIComponent("Password reset request");
-    const body = encodeURIComponent(
-      `Please help me reset my Ordanex password for: ${email || "my account"}`
-    );
-    window.location.href = `mailto:support@ordanex.ai?subject=${subject}&body=${body}`;
+  async function handleResetRequest(e: React.FormEvent) {
+    e.preventDefault();
+
+    try {
+      setResetLoading(true);
+      setResetMessage("");
+
+      const res = await fetch(`${API_BASE}/auth/forgot-password`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: resetEmail }),
+      });
+
+      if (!res.ok) {
+        throw new Error(await parseApiError(res));
+      }
+
+      const data = await res.json();
+      setResetMessage(data?.message || "Reset link sent.");
+    } catch (err: any) {
+      setResetMessage(err?.message || "Unable to request a password reset.");
+    } finally {
+      setResetLoading(false);
+    }
   }
 
   async function handleLogin(e: React.FormEvent) {
@@ -132,7 +154,15 @@ export default function LoginPage() {
               <div>
                 <div style={labelRow}>
                   <span style={labelStyle}>Password</span>
-                  <button type="button" style={linkButton} onClick={handleForgotPassword}>
+                  <button
+                    type="button"
+                    style={linkButton}
+                    onClick={() => {
+                      setShowResetRequest((current) => !current);
+                      setResetEmail(email || "admin@ordanex.com");
+                      setResetMessage("");
+                    }}
+                  >
                     Forgot password?
                   </button>
                 </div>
@@ -146,6 +176,48 @@ export default function LoginPage() {
                   autoComplete="current-password"
                 />
               </div>
+
+              {showResetRequest ? (
+                <div style={resetPanel}>
+                  <div style={resetTitle}>Reset password</div>
+                  <div style={resetBody}>
+                    Enter your email address and we will send you a secure reset link.
+                  </div>
+                  <form onSubmit={handleResetRequest} style={{ display: "grid", gap: 10 }}>
+                    <input
+                      value={resetEmail}
+                      onChange={(e) => setResetEmail(e.target.value)}
+                      placeholder="Enter your email"
+                      style={inputStyle}
+                      autoComplete="email"
+                    />
+                    <div style={resetActions}>
+                      <button
+                        type="submit"
+                        style={{
+                          ...secondaryButton,
+                          opacity: resetLoading ? 0.85 : 1,
+                          cursor: resetLoading ? "not-allowed" : "pointer",
+                        }}
+                        disabled={resetLoading}
+                      >
+                        {resetLoading ? "Sending..." : "Send reset link"}
+                      </button>
+                      <button
+                        type="button"
+                        style={ghostButton}
+                        onClick={() => {
+                          setShowResetRequest(false);
+                          setResetMessage("");
+                        }}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </form>
+                  {resetMessage ? <div style={resetMessageStyle}>{resetMessage}</div> : null}
+                </div>
+              ) : null}
 
               <button
                 type="submit"
@@ -410,6 +482,64 @@ const linkButton: React.CSSProperties = {
   fontWeight: 700,
   cursor: "pointer",
   padding: 0,
+};
+
+const resetPanel: React.CSSProperties = {
+  border: "1px solid #d7e1ee",
+  background: "#f8fbff",
+  borderRadius: 14,
+  padding: 14,
+  display: "grid",
+  gap: 10,
+};
+
+const resetTitle: React.CSSProperties = {
+  fontSize: 14,
+  fontWeight: 800,
+  color: "#0f172a",
+};
+
+const resetBody: React.CSSProperties = {
+  fontSize: 13,
+  color: "#64748b",
+  lineHeight: 1.6,
+};
+
+const resetActions: React.CSSProperties = {
+  display: "flex",
+  gap: 10,
+  flexWrap: "wrap",
+};
+
+const secondaryButton: React.CSSProperties = {
+  border: "1px solid #2563eb",
+  background: "#2563eb",
+  color: "#fff",
+  borderRadius: 10,
+  padding: "10px 14px",
+  fontSize: 13,
+  fontWeight: 700,
+};
+
+const ghostButton: React.CSSProperties = {
+  border: "1px solid #d7e1ee",
+  background: "#fff",
+  color: "#0f172a",
+  borderRadius: 10,
+  padding: "10px 14px",
+  fontSize: 13,
+  fontWeight: 700,
+  cursor: "pointer",
+};
+
+const resetMessageStyle: React.CSSProperties = {
+  border: "1px solid #bfdbfe",
+  background: "#eff6ff",
+  color: "#1d4ed8",
+  borderRadius: 10,
+  padding: "10px 12px",
+  fontSize: 13,
+  lineHeight: 1.5,
 };
 
 const inputStyle: React.CSSProperties = {

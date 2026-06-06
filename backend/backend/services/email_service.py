@@ -1,5 +1,9 @@
 import os
+import base64
+import json
 import smtplib
+import urllib.request
+import urllib.error
 from email import encoders
 from email.mime.base import MIMEBase
 from email.mime.multipart import MIMEMultipart
@@ -7,6 +11,104 @@ from email.mime.text import MIMEText
 from pathlib import Path
 from sqlalchemy.orm import Session
 from backend.db import models
+
+
+DEFAULT_APPLICATION_FROM_EMAIL = (os.getenv("APPLICATION_FROM_EMAIL") or os.getenv("NOTIFICATION_FROM_EMAIL") or "noreply@ordanex.ai").strip()
+DEFAULT_RESEND_API_KEY = (os.getenv("RESEND_API_KEY") or "").strip()
+DEFAULT_RESEND_REPLY_TO = (os.getenv("APPLICATION_REPLY_TO_EMAIL") or os.getenv("NOTIFICATION_REPLY_TO_EMAIL") or "").strip()
+
+
+def _resend_attachment_payloads(attachments):
+    payloads = []
+    for attachment in attachments or []:
+        if not isinstance(attachment, dict):
+            continue
+        filename = str(attachment.get("filename") or "attachment.bin").strip() or "attachment.bin"
+        content = attachment.get("content")
+        path = attachment.get("path")
+        if content is None and path:
+            try:
+                content = Path(path).read_bytes()
+            except Exception:
+                continue
+        if content is None:
+            continue
+        if isinstance(content, str):
+            content_bytes = content.encode("utf-8")
+        else:
+            content_bytes = bytes(content)
+        payload = {
+            "filename": filename,
+            "content": base64.b64encode(content_bytes).decode("ascii"),
+        }
+        content_type = str(attachment.get("content_type") or "").strip()
+        if content_type:
+            payload["content_type"] = content_type
+        payloads.append(payload)
+    return payloads
+
+
+def _send_via_resend(from_email: str, recipients: list[str], subject: str, body_html: str, attachments=None):
+    if not DEFAULT_RESEND_API_KEY:
+        return False, "Resend API key is not configured for application notifications."
+
+    payload = {
+        "from": from_email,
+        "to": recipients,
+        "subject": subject,
+        "html": body_html or "",
+    }
+    if DEFAULT_RESEND_REPLY_TO:
+        payload["reply_to"] = [DEFAULT_RESEND_REPLY_TO]
+
+    attachment_payloads = _resend_attachment_payloads(attachments)
+    if attachment_payloads:
+        payload["attachments"] = attachment_payloads
+
+    request = urllib.request.Request(
+        "https://api.resend.com/emails",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {DEFAULT_RESEND_API_KEY}",
+            "Content-Type": "application/json",
+            "User-Agent": "ordanex-backend/1.0",
+        },
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            body = response.read().decode("utf-8", errors="replace")
+            if 200 <= response.status < 300:
+                return True, body or "Email sent successfully via Resend"
+            return False, body or f"Resend returned HTTP {response.status}"
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        return False, detail or f"Resend HTTP error {exc.code}"
+    except Exception as exc:
+        return False, str(exc)
+
+
+def send_application_email(
+    recipients: list[str],
+    subject: str,
+    body_html: str,
+    attachments=None,
+):
+    cleaned_recipients = [str(item).strip() for item in (recipients or []) if str(item).strip()]
+    if not cleaned_recipients:
+        return False, "No recipients provided"
+    if not DEFAULT_APPLICATION_FROM_EMAIL:
+        return False, "Application notification sender is not configured."
+    if DEFAULT_RESEND_API_KEY:
+        return _send_via_resend(
+            DEFAULT_APPLICATION_FROM_EMAIL,
+            cleaned_recipients,
+            subject,
+            body_html,
+            attachments,
+        )
+    return False, "Resend API key is not configured for application notifications."
 
 
 def _coerce_attachment_payload(attachment):
@@ -42,11 +144,11 @@ def send_notification(tenant_cfg: dict, event_type: str, subject: str, body_html
     notifications = tenant_cfg.get("notifications", {}) or {}
     if not notifications.get("enabled", False):
         return False, "Notifications are disabled"
-    smtp_server = notifications.get("smtp_server")
+    smtp_server = str(notifications.get("smtp_server") or "").strip()
     smtp_port = int(notifications.get("smtp_port", 587))
-    smtp_username = notifications.get("smtp_username")
-    smtp_password = notifications.get("smtp_password")
-    from_email = notifications.get("from_email") or smtp_username
+    smtp_username = str(notifications.get("smtp_username") or "").strip()
+    smtp_password = str(notifications.get("smtp_password") or "")
+    from_email = DEFAULT_APPLICATION_FROM_EMAIL
     use_tls = bool(notifications.get("use_tls", True))
     recipient_map = {
         "upload_success": notifications.get("success_recipients", []),
@@ -57,8 +159,20 @@ def send_notification(tenant_cfg: dict, event_type: str, subject: str, body_html
         "test": notifications.get("test_recipients", []),
     }
     recipients = recipient_map.get(event_type, [])
+    if isinstance(recipients, str):
+        recipients = [item.strip() for item in recipients.split(",") if item.strip()]
+    else:
+        recipients = [str(item).strip() for item in (recipients or []) if str(item).strip()]
+
     if not recipients:
         return False, f"No recipients configured for event_type={event_type}"
+    if not from_email:
+        return False, "Application notification sender is not configured."
+    if not DEFAULT_RESEND_API_KEY and not smtp_server:
+        return False, "Neither Resend API key nor SMTP server is configured for application notifications."
+    if DEFAULT_RESEND_API_KEY:
+        return _send_via_resend(from_email, recipients, subject, body_html, attachments)
+
     try:
         msg = MIMEMultipart("mixed")
         msg["Subject"] = subject

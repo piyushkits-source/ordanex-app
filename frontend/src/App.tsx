@@ -4,6 +4,7 @@ import ClientConfigWorkspacePage from "./pages/ClientConfigWorkspacePage";
 import TradingPartnerPage from "./pages/TradingPartnerPage";
 import TradingPartnerWorkspacePage from "./pages/TradingPartnerWorkspacePage";
 import LoginPage from "./pages/LoginPage";
+import ResetPasswordPage from "./pages/ResetPasswordPage";
 import UsersPage from "./pages/UsersPage";
 import ReportsPage from "./pages/ReportsPage";
 import AnalyticsPage from "./pages/AnalyticsPage";
@@ -51,6 +52,14 @@ export default function App() {
         element={
           <PublicRoute>
             <LoginPage />
+          </PublicRoute>
+        }
+      />
+      <Route
+        path="/reset-password"
+        element={
+          <PublicRoute>
+            <ResetPasswordPage />
           </PublicRoute>
         }
       />
