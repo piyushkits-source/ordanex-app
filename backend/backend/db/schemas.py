@@ -102,6 +102,27 @@ class ClientERPConfigRead(ClientERPConfigCreate):
     updated_at: Optional[datetime] = None
     model_config = {"from_attributes": True}
 
+class ClientSyncEventCreate(BaseModel):
+    client_id: str
+    sync_key: str
+    event_type: str = "HEALTH_CHECK"
+    status: str = "UNKNOWN"
+    message: str | None = None
+    endpoint_url: str | None = None
+    source_system: str | None = None
+    target_system: str | None = None
+    records_synced: int = 0
+    duration_ms: int | None = None
+    last_synced_at: datetime | None = None
+    details_json: dict[str, Any] = Field(default_factory=dict)
+
+
+class ClientSyncEventRead(ClientSyncEventCreate):
+    sync_event_id: UUID
+    created_at: datetime | None = None
+    model_config = {"from_attributes": True}
+
+
 class TradingPartnerCreate(BaseModel):
     client_id: str
     vertical_id: UUID | None = None
@@ -256,6 +277,9 @@ class LoginResponse(BaseModel):
     client_id: str | None = None
     environment: str | None = None
     subscription_type: str | None = None
+    feature_flags: list[str] = Field(default_factory=list)
+    disabled_feature_flags: list[str] = Field(default_factory=list)
+    disabled_feature_flags: list[str] = Field(default_factory=list)
 
 # =========================================================
 # MAPPINGS
@@ -402,6 +426,122 @@ class PurchaseOrderUpdate(BaseModel):
     raw_text: Optional[str] = None
     items: Optional[List[PurchaseOrderItemUpdate]] = None
     mappings: Optional[List[MappingUpdate]] = None
+
+
+class BuyerPortalCatalogItem(BaseModel):
+    sku: str
+    name: str
+    description: str | None = None
+    details: str | None = None
+    category: str | None = None
+    brand: str | None = None
+    unit_price: float
+    currency: str = "USD"
+    uom: str = "EA"
+    image_url: str | None = None
+    video_url: str | None = None
+    media: list[dict[str, Any]] | None = None
+    stock_status: str | None = "Available"
+    lead_time: str | None = None
+    min_order_qty: float | None = None
+    moq_uom: str | None = None
+    payment_terms: str | None = None
+    supplier_name: str | None = None
+    specifications: dict[str, str] | None = None
+
+
+class BuyerPortalOrderItem(BaseModel):
+    sku: str
+    name: str | None = None
+    description: str | None = None
+    quantity: float
+    unit_price: float
+    uom: str = "EA"
+    delivery_date: date | None = None
+
+
+class BuyerPortalOrderCreate(BaseModel):
+    client_id: str
+    buyer_name: str
+    buyer_email: str
+    company_name: str | None = None
+    sold_to: str | None = None
+    ship_to: str | None = None
+    ship_to_name: str | None = None
+    ship_to_address: str | None = None
+    currency: str | None = None
+    notes: str | None = None
+    payment_method: str | None = None
+    payment_reference: str | None = None
+    payment_proof_name: str | None = None
+    payment_proof_url: str | None = None
+    payment_proof_storage_key: str | None = None
+    payment_proof_data_url: str | None = None
+    items: list[BuyerPortalOrderItem] = Field(default_factory=list)
+
+
+class BuyerPortalInvoiceDetails(BaseModel):
+    invoice_number: str | None = None
+    invoice_date: str | None = None
+    invoice_amount: float | None = None
+    currency: str | None = None
+    due_date: str | None = None
+    payment_status: str | None = None
+    invoice_url: str | None = None
+    invoice_file_name: str | None = None
+    invoice_storage_key: str | None = None
+    invoice_file_data_url: str | None = None
+    invoice_notes: str | None = None
+
+
+class BuyerPortalShipmentDetails(BaseModel):
+    shipment_number: str | None = None
+    shipment_status: str | None = None
+    carrier: str | None = None
+    tracking_number: str | None = None
+    tracking_url: str | None = None
+    shipment_document_name: str | None = None
+    shipment_document_url: str | None = None
+    shipment_document_storage_key: str | None = None
+    shipment_document_data_url: str | None = None
+    ship_date: str | None = None
+    estimated_delivery_date: str | None = None
+    delivered_date: str | None = None
+    shipment_notes: str | None = None
+
+
+class BuyerPortalPaymentDetails(BaseModel):
+    payment_method: str | None = None
+    payment_reference: str | None = None
+    payment_status: str | None = None
+    payment_proof_name: str | None = None
+    payment_proof_url: str | None = None
+    payment_proof_storage_key: str | None = None
+    payment_proof_data_url: str | None = None
+    payment_proof_uploaded_at: str | None = None
+
+
+class BuyerPortalOrderRead(PurchaseOrderRead):
+    buyer_name: str | None = None
+    buyer_email: str | None = None
+    company_name: str | None = None
+    payment_method: str | None = None
+    payment_reference: str | None = None
+    payment_status: str | None = None
+    payment_proof_name: str | None = None
+    payment_proof_url: str | None = None
+    payment_proof_storage_key: str | None = None
+    payment_proof_data_url: str | None = None
+    payment: BuyerPortalPaymentDetails | None = None
+    invoice: BuyerPortalInvoiceDetails | None = None
+    shipment: BuyerPortalShipmentDetails | None = None
+    tracking_steps: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class BuyerPortalOrderCommerceUpdate(BaseModel):
+    payment: BuyerPortalPaymentDetails | None = None
+    invoice: BuyerPortalInvoiceDetails | None = None
+    shipment: BuyerPortalShipmentDetails | None = None
 
 # =========================================================
 # REPROCESS / NOTIFICATION
