@@ -48,3 +48,5 @@ boto3==1.35.36
 PyJWT==2.8.0
 
 email-validator==2.2.0
+
+pdf2image==1.17.0
