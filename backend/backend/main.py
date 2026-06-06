@@ -1,4 +1,8 @@
 
+from backend.core.env_loader import load_backend_env
+
+load_backend_env()
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -41,6 +45,7 @@ from backend.api.monitoring_dashboard_api import router as monitoring_dashboard_
 from backend.api.polling_admin_api import router as polling_admin_router
 from backend.api.support_api import router as support_router
 from backend.api.trading_partner_agentic_api import router as trading_partner_agentic_router
+from backend.api.buyer_portal_api import router as buyer_portal_router
 from backend.api.system_api import router as system_router
 
 from fastapi.middleware.cors import CORSMiddleware
@@ -56,8 +61,6 @@ from backend.bootstrap import ensure_runtime_schema_extensions
 
 # New orchestration / SaaS routing
 from backend.api.core_router import core_router
-
-print("DB URL:", engine.url)
 
 app = FastAPI(title="Order Automation API")
 
@@ -112,6 +115,7 @@ app.include_router(monitoring_dashboard_router)
 app.include_router(polling_admin_router)
 app.include_router(support_router)
 app.include_router(trading_partner_agentic_router)
+app.include_router(buyer_portal_router)
 app.include_router(system_router)
 
 
