@@ -575,6 +575,20 @@ const resetMessageStyle: React.CSSProperties = {
   lineHeight: 1.5,
 };
 
+const inputStyle: React.CSSProperties = {
+  width: "100%",
+  minHeight: 50,
+  padding: "11px 14px",
+  borderRadius: 14,
+  border: "1px solid #d7e1ee",
+  background: "rgba(255,255,255,0.94)",
+  fontSize: 14,
+  color: "#0f172a",
+  outline: "none",
+  boxSizing: "border-box",
+  boxShadow: "0 6px 18px rgba(15,23,42,0.04)",
+};
+
 const passwordFieldShell: React.CSSProperties = {
   position: "relative",
 };
@@ -605,20 +619,6 @@ const passwordToggleButton: React.CSSProperties = {
 const passwordToggleIcon: React.CSSProperties = {
   width: 18,
   height: 18,
-};
-
-const inputStyle: React.CSSProperties = {
-  width: "100%",
-  minHeight: 50,
-  padding: "11px 14px",
-  borderRadius: 14,
-  border: "1px solid #d7e1ee",
-  background: "rgba(255,255,255,0.94)",
-  fontSize: 14,
-  color: "#0f172a",
-  outline: "none",
-  boxSizing: "border-box",
-  boxShadow: "0 6px 18px rgba(15,23,42,0.04)",
 };
 
 const primaryButton: React.CSSProperties = {
