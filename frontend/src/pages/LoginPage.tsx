@@ -2,9 +2,9 @@ import React, { useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { getPostLoginPath, saveAuth } from "../utils/auth";
 import { parseApiError } from "../utils/api";
+import { API_BASE } from "../api/apiClient";
 import ordanexLoginImage from "../assets/ordanex-login.png";
 
-const API_BASE = "";
 
 export default function LoginPage() {
   const navigate = useNavigate();

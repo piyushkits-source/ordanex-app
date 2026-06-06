@@ -1,4 +1,5 @@
 import { getDefaultRouteForAuth } from "./access";
+import { API_BASE } from "../api/apiClient";
 
 export type AuthUser = {
   access_token: string;
@@ -20,6 +21,7 @@ let bootLogoutApplied = false;
 
 export function saveAuth(auth: AuthUser) {
   localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(auth));
+  localStorage.setItem("access_token", auth.access_token);
 }
 
 export function getAuth(): AuthUser | null {
@@ -52,6 +54,7 @@ export function isAuthenticated(): boolean {
 
 export function clearAuth() {
   localStorage.removeItem(AUTH_STORAGE_KEY);
+  localStorage.removeItem("access_token");
 }
 
 export function clearAuthOnAppBoot() {
@@ -78,7 +81,7 @@ export async function verifyCurrentSession(): Promise<boolean> {
   if (!token) return false;
 
   try {
-    const response = await fetch("/auth/me", {
+    const response = await fetch(`${API_BASE}/auth/me`, {
       method: "GET",
       headers: getAuthHeaders(),
       cache: "no-store",
