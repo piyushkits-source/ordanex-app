@@ -1,4 +1,6 @@
 
+import os
+
 from backend.core.env_loader import load_backend_env
 
 load_backend_env()
@@ -64,8 +66,21 @@ from backend.api.core_router import core_router
 
 app = FastAPI(title="Order Automation API")
 
+cors_allowed_origins = [
+    "https://app.ordanex.ai",
+    "https://ordanex.ai",
+    "https://www.ordanex.ai",
+]
+
+extra_cors_origins = os.getenv("CORS_ALLOWED_ORIGINS", "")
+if extra_cors_origins.strip():
+    cors_allowed_origins.extend(
+        origin.strip() for origin in extra_cors_origins.split(",") if origin.strip()
+    )
+
 app.add_middleware(
     CORSMiddleware,
+    allow_origins=cors_allowed_origins,
     allow_origin_regex=r"http://(localhost|127\.0\.0\.1):\d+",
     allow_credentials=True,
     allow_methods=["*"],
