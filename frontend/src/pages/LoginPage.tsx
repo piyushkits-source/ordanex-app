@@ -12,6 +12,7 @@ export default function LoginPage() {
 
   const [email, setEmail] = useState("admin@ordanex.com");
   const [password, setPassword] = useState("Admin@123");
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [showResetRequest, setShowResetRequest] = useState(false);
@@ -24,8 +25,8 @@ export default function LoginPage() {
     return params.get("next");
   }, [location.search]);
 
-  async function handleResetRequest(e: React.FormEvent) {
-    e.preventDefault();
+  async function handleResetRequest(e?: React.SyntheticEvent) {
+    e?.preventDefault();
 
     try {
       setResetLoading(true);
@@ -167,14 +168,45 @@ export default function LoginPage() {
                   </button>
                 </div>
 
-                <input
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Enter your password"
-                  style={inputStyle}
-                  autoComplete="current-password"
-                />
+                <div style={passwordFieldShell}>
+                  <input
+                    type={showPassword ? "text" : "password"}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="Enter your password"
+                    style={passwordInputStyle}
+                    autoComplete="current-password"
+                  />
+                  <button
+                    type="button"
+                    style={passwordToggleButton}
+                    onClick={() => setShowPassword((current) => !current)}
+                    aria-label={showPassword ? "Hide password" : "Show password"}
+                    aria-pressed={showPassword}
+                    title={showPassword ? "Hide password" : "Show password"}
+                  >
+                    <svg viewBox="0 0 24 24" style={passwordToggleIcon} aria-hidden="true">
+                      <path
+                        d="M2 12C4.6 7.8 8 5.8 12 5.8S19.4 7.8 22 12c-2.6 4.2-6 6.2-10 6.2S4.6 16.2 2 12Z"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.8"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                      <circle cx="12" cy="12" r="3.2" fill="none" stroke="currentColor" strokeWidth="1.8" />
+                      {showPassword ? null : (
+                        <path
+                          d="M4 4 20 20"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.8"
+                          strokeLinecap="round"
+                        />
+                      )}
+                    </svg>
+                  </button>
+                </div>
               </div>
 
               {showResetRequest ? (
@@ -183,7 +215,7 @@ export default function LoginPage() {
                   <div style={resetBody}>
                     Enter your email address and we will send you a secure reset link.
                   </div>
-                  <form onSubmit={handleResetRequest} style={{ display: "grid", gap: 10 }}>
+                  <div style={{ display: "grid", gap: 10 }}>
                     <input
                       value={resetEmail}
                       onChange={(e) => setResetEmail(e.target.value)}
@@ -193,13 +225,14 @@ export default function LoginPage() {
                     />
                     <div style={resetActions}>
                       <button
-                        type="submit"
+                        type="button"
                         style={{
                           ...secondaryButton,
                           opacity: resetLoading ? 0.85 : 1,
                           cursor: resetLoading ? "not-allowed" : "pointer",
                         }}
                         disabled={resetLoading}
+                        onClick={() => void handleResetRequest()}
                       >
                         {resetLoading ? "Sending..." : "Send reset link"}
                       </button>
@@ -214,7 +247,7 @@ export default function LoginPage() {
                         Cancel
                       </button>
                     </div>
-                  </form>
+                  </div>
                   {resetMessage ? <div style={resetMessageStyle}>{resetMessage}</div> : null}
                 </div>
               ) : null}
@@ -540,6 +573,38 @@ const resetMessageStyle: React.CSSProperties = {
   padding: "10px 12px",
   fontSize: 13,
   lineHeight: 1.5,
+};
+
+const passwordFieldShell: React.CSSProperties = {
+  position: "relative",
+};
+
+const passwordInputStyle: React.CSSProperties = {
+  ...inputStyle,
+  paddingRight: 52,
+};
+
+const passwordToggleButton: React.CSSProperties = {
+  position: "absolute",
+  top: "50%",
+  right: 10,
+  transform: "translateY(-50%)",
+  width: 34,
+  height: 34,
+  border: "none",
+  borderRadius: 10,
+  background: "transparent",
+  color: "#64748b",
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  cursor: "pointer",
+  padding: 0,
+};
+
+const passwordToggleIcon: React.CSSProperties = {
+  width: 18,
+  height: 18,
 };
 
 const inputStyle: React.CSSProperties = {

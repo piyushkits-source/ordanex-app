@@ -10,6 +10,8 @@ export default function ResetPasswordPage() {
 
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -70,26 +72,88 @@ export default function ResetPasswordPage() {
         <form onSubmit={handleSubmit} style={{ display: "grid", gap: 16 }}>
           <div>
             <div style={labelStyle}>New password</div>
-            <input
-              type="password"
-              value={newPassword}
-              onChange={(e) => setNewPassword(e.target.value)}
-              placeholder="Enter a new password"
-              style={inputStyle}
-              autoComplete="new-password"
-            />
+            <div style={passwordFieldShell}>
+              <input
+                type={showNewPassword ? "text" : "password"}
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                placeholder="Enter a new password"
+                style={passwordInputStyle}
+                autoComplete="new-password"
+              />
+              <button
+                type="button"
+                style={passwordToggleButton}
+                onClick={() => setShowNewPassword((current) => !current)}
+                aria-label={showNewPassword ? "Hide password" : "Show password"}
+                aria-pressed={showNewPassword}
+                title={showNewPassword ? "Hide password" : "Show password"}
+              >
+                <svg viewBox="0 0 24 24" style={passwordToggleIcon} aria-hidden="true">
+                  <path
+                    d="M2 12C4.6 7.8 8 5.8 12 5.8S19.4 7.8 22 12c-2.6 4.2-6 6.2-10 6.2S4.6 16.2 2 12Z"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                  <circle cx="12" cy="12" r="3.2" fill="none" stroke="currentColor" strokeWidth="1.8" />
+                  {showNewPassword ? null : (
+                    <path
+                      d="M4 4 20 20"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.8"
+                      strokeLinecap="round"
+                    />
+                  )}
+                </svg>
+              </button>
+            </div>
           </div>
 
           <div>
             <div style={labelStyle}>Confirm password</div>
-            <input
-              type="password"
-              value={confirmPassword}
-              onChange={(e) => setConfirmPassword(e.target.value)}
-              placeholder="Confirm your new password"
-              style={inputStyle}
-              autoComplete="new-password"
-            />
+            <div style={passwordFieldShell}>
+              <input
+                type={showConfirmPassword ? "text" : "password"}
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                placeholder="Confirm your new password"
+                style={passwordInputStyle}
+                autoComplete="new-password"
+              />
+              <button
+                type="button"
+                style={passwordToggleButton}
+                onClick={() => setShowConfirmPassword((current) => !current)}
+                aria-label={showConfirmPassword ? "Hide password" : "Show password"}
+                aria-pressed={showConfirmPassword}
+                title={showConfirmPassword ? "Hide password" : "Show password"}
+              >
+                <svg viewBox="0 0 24 24" style={passwordToggleIcon} aria-hidden="true">
+                  <path
+                    d="M2 12C4.6 7.8 8 5.8 12 5.8S19.4 7.8 22 12c-2.6 4.2-6 6.2-10 6.2S4.6 16.2 2 12Z"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                  <circle cx="12" cy="12" r="3.2" fill="none" stroke="currentColor" strokeWidth="1.8" />
+                  {showConfirmPassword ? null : (
+                    <path
+                      d="M4 4 20 20"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.8"
+                      strokeLinecap="round"
+                    />
+                  )}
+                </svg>
+              </button>
+            </div>
           </div>
 
           <button
@@ -222,4 +286,36 @@ const linkStyle: React.CSSProperties = {
   color: "#0b5fff",
   fontWeight: 700,
   textDecoration: "none",
+};
+
+const passwordFieldShell: React.CSSProperties = {
+  position: "relative",
+};
+
+const passwordInputStyle: React.CSSProperties = {
+  ...inputStyle,
+  paddingRight: 52,
+};
+
+const passwordToggleButton: React.CSSProperties = {
+  position: "absolute",
+  top: "50%",
+  right: 10,
+  transform: "translateY(-50%)",
+  width: 34,
+  height: 34,
+  border: "none",
+  borderRadius: 10,
+  background: "transparent",
+  color: "#64748b",
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  cursor: "pointer",
+  padding: 0,
+};
+
+const passwordToggleIcon: React.CSSProperties = {
+  width: 18,
+  height: 18,
 };
