@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import PageHeader from "../components/common/PageHeader";
 import { apiFetch, parseApiError } from "../utils/api";
 import { getAuth } from "../utils/auth";
+import { useAppScope } from "../context/AppScopeContext";
 
 const API_BASE = "/users";
 
@@ -19,8 +20,8 @@ type UserRow = {
 
 export default function UsersPage() {
   const auth = getAuth();
-  const activeEnvironment = String(auth?.environment || "production").toLowerCase();
-  const environmentLabel = activeEnvironment === "production" ? "Production" : "Staging";
+  const { scope } = useAppScope();
+  const scopeEnvironment = String(scope.environment || auth?.environment || "PROD").toUpperCase() === "PROD" ? "production" : "staging";
   const [rows, setRows] = useState<UserRow[]>([]);
   const [banner, setBanner] = useState("");
   const [loading, setLoading] = useState(false);
@@ -29,21 +30,25 @@ export default function UsersPage() {
     email: "",
     password: "",
     role: "client_admin",
-    environment: activeEnvironment,
+    environment: scopeEnvironment,
     is_active: true,
   });
 
-  useEffect(() => { loadUsers(); }, []);
+  useEffect(() => {
+    setForm((current) => ({ ...current, environment: scopeEnvironment }));
+  }, [scopeEnvironment]);
+
+  const environmentLabel = form.environment === "production" ? "Production" : "Staging";
 
   useEffect(() => {
-    setForm((current) => ({ ...current, environment: activeEnvironment }));
-  }, [activeEnvironment]);
+    loadUsers();
+  }, [form.environment]);
 
   async function loadUsers() {
     try {
       setLoading(true);
       setBanner("");
-      const res = await apiFetch(API_BASE, { method: "GET" });
+      const res = await apiFetch(`${API_BASE}?environment=${encodeURIComponent(form.environment)}`, { method: "GET" });
       if (!res.ok) throw new Error(await parseApiError(res));
       const data = await res.json();
       setRows(Array.isArray(data) ? data : []);
@@ -64,7 +69,7 @@ export default function UsersPage() {
         email: "",
         password: "",
         role: "client_admin",
-        environment: activeEnvironment,
+        environment: form.environment,
         is_active: true,
       });
       await loadUsers();
@@ -75,7 +80,7 @@ export default function UsersPage() {
 
   async function toggleActive(email: string, is_active: boolean) {
     try {
-      const res = await apiFetch(`${API_BASE}/${encodeURIComponent(email)}/active`, { method: "PUT", body: JSON.stringify({ is_active: !is_active }) });
+      const res = await apiFetch(`${API_BASE}/${encodeURIComponent(email)}/active?environment=${encodeURIComponent(form.environment)}`, { method: "PUT", body: JSON.stringify({ is_active: !is_active }) });
       if (!res.ok) throw new Error(await parseApiError(res));
       setBanner("User status updated.");
       await loadUsers();
@@ -107,7 +112,12 @@ export default function UsersPage() {
             {field("Email", <input value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} style={input} />)}
             {field("Password", <input type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} style={input} />)}
             {field("Role", <select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })} style={input}><option value="super_admin">super_admin</option><option value="client_admin">client_admin</option><option value="it_admin">it_admin</option><option value="business_user">business_user</option></select>)}
-            {field("Environment", <input value={environmentLabel} style={{ ...input, background: "#f8fafc", color: "#475569" }} readOnly />)}
+            {field("Environment", (
+              <select value={form.environment} onChange={(e) => setForm({ ...form, environment: e.target.value })} style={input}>
+                <option value="production">Production</option>
+                <option value="staging">Staging</option>
+              </select>
+            ))}
           </div>
           <div style={{ marginTop: 14 }}><button type="button" style={primaryButton} onClick={createUser}>Create User</button></div>
         </div>

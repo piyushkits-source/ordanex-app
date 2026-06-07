@@ -24,7 +24,7 @@ type ClientRow = {
 type SectionKey = "CLIENT" | "STOREFRONT" | "VERTICALS" | "CONNECTIONS" | "ERP";
 
 const sections: { key: SectionKey; label: string; helper: string }[] = [
-  { key: "CLIENT", label: "Client Master", helper: "Identity, subscription, and default business values" },
+  { key: "CLIENT", label: "Client Master", helper: "Identity, subscription, workspace defaults, legal, billing, and banking setup" },
   { key: "STOREFRONT", label: "Storefront", helper: "Buyer portal setup, approval list, and catalog source" },
   { key: "VERTICALS", label: "Business Verticals", helper: "Business entities that operate under the client" },
   { key: "CONNECTIONS", label: "Client Connections", helper: "How the client exchanges messages with Ordanex" },

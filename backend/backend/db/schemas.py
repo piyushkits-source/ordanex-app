@@ -36,6 +36,44 @@ class ClientRead(ClientCreate):
     updated_at: Optional[datetime] = None
     model_config = {"from_attributes": True}
 
+
+class ClientLegalTaxDetails(BaseModel):
+    legal_entity_name: Optional[str] = None
+    registration_number: Optional[str] = None
+    tax_registration_id: Optional[str] = None
+    country: Optional[str] = None
+    region: Optional[str] = None
+    registered_address: Optional[str] = None
+
+
+class ClientBillingInvoicingDetails(BaseModel):
+    invoice_recipient: Optional[str] = None
+    billing_email: Optional[str] = None
+    payment_terms: Optional[str] = None
+    default_payment_mode: Optional[str] = None
+    billing_currency: Optional[str] = None
+    billing_address: Optional[str] = None
+
+
+class ClientBankingRemittanceDetails(BaseModel):
+    beneficiary_name: Optional[str] = None
+    bank_name: Optional[str] = None
+    account_number: Optional[str] = None
+    iban: Optional[str] = None
+    swift_code: Optional[str] = None
+    remittance_email: Optional[str] = None
+    remittance_notes: Optional[str] = None
+
+
+class ClientProfileDetailsUpdate(BaseModel):
+    legal_tax: ClientLegalTaxDetails = Field(default_factory=ClientLegalTaxDetails)
+    billing_invoicing: ClientBillingInvoicingDetails = Field(default_factory=ClientBillingInvoicingDetails)
+    banking_remittance: ClientBankingRemittanceDetails = Field(default_factory=ClientBankingRemittanceDetails)
+
+
+class ClientProfileDetailsRead(ClientProfileDetailsUpdate):
+    client_id: str
+
 class VerticalCreate(BaseModel):
     client_id: str
     vertical_code: str

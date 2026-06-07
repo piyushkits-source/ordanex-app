@@ -36,13 +36,14 @@ class ResetPasswordRequest(BaseModel):
 @router.get("")
 def list_users(
     client_id: str | None = None,
+    environment: str | None = None,
     db: Session = Depends(get_db),
     current_user: UserContext = Depends(require_roles("super_admin", "client_admin")),
 ):
     if current_user.role != "super_admin":
         client_id = current_user.client_id
 
-    env = current_environment()
+    env = (environment or current_environment()).strip().lower()
     q = db.query(models.User)
     if client_id:
         q = q.filter(models.User.client_id == client_id)
@@ -101,10 +102,11 @@ def create_user(
 def set_user_active(
     email: str,
     payload: ActiveStatusRequest,
+    environment: str | None = None,
     db: Session = Depends(get_db),
     current_user: UserContext = Depends(require_roles("super_admin", "client_admin")),
 ):
-    env = current_environment()
+    env = (environment or current_environment()).strip().lower()
     user = _find_user_by_email_and_environment(db, email, env)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -125,10 +127,11 @@ def set_user_active(
 def reset_password(
     email: str,
     payload: ResetPasswordRequest,
+    environment: str | None = None,
     db: Session = Depends(get_db),
     current_user: UserContext = Depends(require_roles("super_admin", "client_admin")),
 ):
-    env = current_environment()
+    env = (environment or current_environment()).strip().lower()
     user = _find_user_by_email_and_environment(db, email, env)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -147,10 +150,11 @@ def reset_password(
 @router.delete("/{email}")
 def delete_user(
     email: str,
+    environment: str | None = None,
     db: Session = Depends(get_db),
     current_user: UserContext = Depends(require_roles("super_admin", "client_admin")),
 ):
-    env = current_environment()
+    env = (environment or current_environment()).strip().lower()
     user = _find_user_by_email_and_environment(db, email, env)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
