@@ -1,3 +1,5 @@
+import { API_BASE } from "./apiClient";
+
 export type PortalFileUploadScope =
   | "catalog-media"
   | "payment-proof"
@@ -60,7 +62,7 @@ export async function uploadPortalFile(
   const form = buildUploadFormData(request);
 
   try {
-    const response = await fetch("/files/upload", {
+    const response = await fetch(`${API_BASE}/files/upload`, {
       method: "POST",
       body: form,
     });

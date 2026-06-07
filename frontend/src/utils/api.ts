@@ -1,3 +1,4 @@
+import { API_BASE } from "../api/apiClient";
 import { getAccessToken, getAuthHeaders, redirectToLogin } from "./auth";
 
 type ApiOptions = RequestInit & {
@@ -15,17 +16,34 @@ function getSelectedEnvironment(): string {
   }
 }
 
+function normalizeApiUrl(url: string): string {
+  if (/^https?:\/\//i.test(url)) return url;
+  if (!API_BASE) return url;
+  if (url.startsWith("/")) return `${API_BASE}${url}`;
+  return `${API_BASE}/${url}`;
+}
+
+function pathFromUrl(url: string): string {
+  try {
+    return new URL(url, API_BASE || window.location.origin).pathname;
+  } catch {
+    return url;
+  }
+}
+
 function isProtectedConfigUrl(url: string): boolean {
+  const path = pathFromUrl(url);
   return (
-    url.startsWith("/client-config") ||
-    url.startsWith("/trading-partners") ||
-    url.startsWith("/trading-partners-agentic")
+    path.startsWith("/client-config") ||
+    path.startsWith("/trading-partners") ||
+    path.startsWith("/trading-partners-agentic")
   );
 }
 
 export async function apiFetch(url: string, options: ApiOptions = {}) {
   const { skipAuthRedirect, headers, ...rest } = options;
   const method = String(rest.method || "GET").toUpperCase();
+  const requestUrl = normalizeApiUrl(url);
 
   if (!["GET", "HEAD", "OPTIONS"].includes(method) && isProtectedConfigUrl(url) && getSelectedEnvironment() === "PROD") {
     throw new Error("Configuration changes are blocked in Production. Switch to Staging to create, edit, or update configuration.");
@@ -33,7 +51,7 @@ export async function apiFetch(url: string, options: ApiOptions = {}) {
 
   let response: Response;
   try {
-    response = await fetch(url, {
+    response = await fetch(requestUrl, {
       ...rest,
       headers: getAuthHeaders(headers),
     });
