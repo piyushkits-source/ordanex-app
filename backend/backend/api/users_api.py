@@ -10,6 +10,15 @@ from backend.services.rbac import require_roles, get_current_user, enforce_clien
 
 router = APIRouter(prefix="/users", tags=["users"])
 
+
+def _find_user_by_email_and_environment(db: Session, email: str, environment: str):
+    return (
+        db.query(models.User)
+        .filter(models.User.email == email)
+        .filter((models.User.environment == environment) | (models.User.environment.is_(None)))
+        .first()
+    )
+
 class CreateUserRequest(BaseModel):
     client_id: str | None = None
     environment: str | None = None
@@ -95,7 +104,8 @@ def set_user_active(
     db: Session = Depends(get_db),
     current_user: UserContext = Depends(require_roles("super_admin", "client_admin")),
 ):
-    user = db.query(models.User).filter(models.User.email == email).first()
+    env = current_environment()
+    user = _find_user_by_email_and_environment(db, email, env)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
@@ -104,7 +114,12 @@ def set_user_active(
 
     user.is_active = payload.is_active
     db.commit()
-    return {"message": "User status updated", "email": email, "is_active": bool(user.is_active)}
+    return {
+        "message": "User status updated",
+        "email": email,
+        "environment": env,
+        "is_active": bool(user.is_active),
+    }
 
 @router.put("/{email}/reset-password")
 def reset_password(
@@ -113,7 +128,8 @@ def reset_password(
     db: Session = Depends(get_db),
     current_user: UserContext = Depends(require_roles("super_admin", "client_admin")),
 ):
-    user = db.query(models.User).filter(models.User.email == email).first()
+    env = current_environment()
+    user = _find_user_by_email_and_environment(db, email, env)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
@@ -122,7 +138,11 @@ def reset_password(
 
     user.password_hash = hash_password(payload.password)
     db.commit()
-    return {"message": "Password reset successfully", "email": email}
+    return {
+        "message": "Password reset successfully",
+        "email": email,
+        "environment": env,
+    }
 
 @router.delete("/{email}")
 def delete_user(
@@ -130,7 +150,8 @@ def delete_user(
     db: Session = Depends(get_db),
     current_user: UserContext = Depends(require_roles("super_admin", "client_admin")),
 ):
-    user = db.query(models.User).filter(models.User.email == email).first()
+    env = current_environment()
+    user = _find_user_by_email_and_environment(db, email, env)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
@@ -139,7 +160,11 @@ def delete_user(
 
     db.delete(user)
     db.commit()
-    return {"message": "User deleted successfully", "email": email}
+    return {
+        "message": "User deleted successfully",
+        "email": email,
+        "environment": env,
+    }
 
 @router.get("/me")
 def me(current_user: UserContext = Depends(get_current_user)):
