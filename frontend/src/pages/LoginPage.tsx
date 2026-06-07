@@ -10,13 +10,13 @@ export default function LoginPage() {
   const navigate = useNavigate();
   const location = useLocation();
 
-  const [email, setEmail] = useState("admin@ordanex.com");
-  const [password, setPassword] = useState("Admin@123");
+  const [email, setEmail] = useState("admin@ordanex.ai");
+  const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [showResetRequest, setShowResetRequest] = useState(false);
-  const [resetEmail, setResetEmail] = useState("admin@ordanex.com");
+  const [resetEmail, setResetEmail] = useState("admin@ordanex.ai");
   const [resetLoading, setResetLoading] = useState(false);
   const [resetMessage, setResetMessage] = useState("");
 
@@ -160,7 +160,7 @@ export default function LoginPage() {
                     style={linkButton}
                     onClick={() => {
                       setShowResetRequest((current) => !current);
-                      setResetEmail(email || "admin@ordanex.com");
+                      setResetEmail(email || "admin@ordanex.ai");
                       setResetMessage("");
                     }}
                   >
