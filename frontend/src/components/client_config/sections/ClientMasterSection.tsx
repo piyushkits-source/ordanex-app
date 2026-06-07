@@ -101,7 +101,7 @@ export default function ClientMasterSection({ client, onSaved, onBanner }: Props
         <div style={heroCard}>
           <div style={heroLabel}>Client Profile</div>
           <div style={grid2}>
-            {field("Client ID", <input value={form.client_id} disabled={!!client} onChange={(e) => setForm({ ...form, client_id: e.target.value.toUpperCase() })} style={!!client ? inputStyleDisabled : inputStyle} placeholder="e.g. DUPONT" />)}
+            {field("Client ID", <input value={form.client_id} disabled={!!client} onChange={(e) => setForm({ ...form, client_id: e.target.value.toUpperCase() })} style={!!client ? inputStyleDisabled : inputStyle} placeholder="e.g. CLIENT_US_01" />)}
             {field("Client Name", <input value={form.client_name || ""} onChange={(e) => setForm({ ...form, client_name: e.target.value })} style={inputStyle} placeholder="Enter client legal or business name" />)}
             {field("Status", <select value={form.status || "ACTIVE"} onChange={(e) => setForm({ ...form, status: e.target.value })} style={inputStyle}><option value="ACTIVE">ACTIVE</option><option value="INACTIVE">INACTIVE</option></select>)}
             {field("Subscription Type", <select value={form.subscription_type || "BASIC"} onChange={(e) => setForm({ ...form, subscription_type: e.target.value })} style={inputStyle}><option value="BASIC">BASIC</option><option value="STANDARD">STANDARD</option><option value="PREMIUM">PREMIUM</option><option value="ENTERPRISE">ENTERPRISE</option></select>)}
@@ -110,11 +110,14 @@ export default function ClientMasterSection({ client, onSaved, onBanner }: Props
 
         <div style={sideCard}>
           <div style={heroLabel}>Workspace Defaults</div>
+          <div style={helperCallout}>
+            Optional fallback values used only when inbound documents omit these identifiers. They do not replace Trading Partner setup, connections, or partner-specific mappings.
+          </div>
           <div style={grid2}>
-            {field("Default Currency", <input value={form.default_currency || ""} onChange={(e) => setForm({ ...form, default_currency: e.target.value.toUpperCase() })} style={inputStyle} placeholder="USD / EUR / INR" />)}
-            {field("Default Vendor", <input value={form.default_vendor || ""} onChange={(e) => setForm({ ...form, default_vendor: e.target.value })} style={inputStyle} placeholder="Optional supplier / vendor" />)}
-            {field("Default Sold-To", <input value={form.default_sold_to || ""} onChange={(e) => setForm({ ...form, default_sold_to: e.target.value })} style={inputStyle} placeholder="Sold-to code" />)}
-            {field("Default Ship-To", <input value={form.default_ship_to || ""} onChange={(e) => setForm({ ...form, default_ship_to: e.target.value })} style={inputStyle} placeholder="Ship-to code" />)}
+            {field("Default Currency", <input value={form.default_currency || ""} onChange={(e) => setForm({ ...form, default_currency: e.target.value.toUpperCase() })} style={inputStyle} placeholder="3-letter code, e.g. USD" />)}
+            {field("Default Vendor / Supplier", <input value={form.default_vendor || ""} onChange={(e) => setForm({ ...form, default_vendor: e.target.value })} style={inputStyle} placeholder="Optional vendor code, e.g. VEND_1001" />)}
+            {field("Default Sold-To", <input value={form.default_sold_to || ""} onChange={(e) => setForm({ ...form, default_sold_to: e.target.value })} style={inputStyle} placeholder="Optional sold-to code, e.g. SOLD_TO_001" />)}
+            {field("Default Ship-To", <input value={form.default_ship_to || ""} onChange={(e) => setForm({ ...form, default_ship_to: e.target.value })} style={inputStyle} placeholder="Optional ship-to code, e.g. SHIP_TO_001" />)}
           </div>
         </div>
       </div>
@@ -140,6 +143,7 @@ const cardGrid: React.CSSProperties = { display: "grid", gridTemplateColumns: "1
 const heroCard: React.CSSProperties = { border: "1px solid #e5e7eb", borderRadius: 14, background: "linear-gradient(180deg, #ffffff 0%, #fbfdff 100%)", padding: 16 };
 const sideCard: React.CSSProperties = { border: "1px solid #e5e7eb", borderRadius: 14, background: "#fff", padding: 16 };
 const heroLabel: React.CSSProperties = { fontSize: 13, fontWeight: 800, color: "#334155", marginBottom: 14 };
+const helperCallout: React.CSSProperties = { marginBottom: 14, border: "1px solid #dbeafe", background: "#eff6ff", color: "#1d4ed8", borderRadius: 10, padding: "10px 12px", fontSize: 12, lineHeight: 1.6 };
 const grid2: React.CSSProperties = { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 };
 const labelStyle: React.CSSProperties = { fontSize: 12, fontWeight: 700, color: "#475569", marginBottom: 6 };
 const inputStyle: React.CSSProperties = { width: "100%", minHeight: 40, padding: "8px 10px", borderRadius: 10, border: "1px solid #dbe4ee", background: "#fff", fontSize: 13, color: "#0f172a", outline: "none", boxSizing: "border-box" };
