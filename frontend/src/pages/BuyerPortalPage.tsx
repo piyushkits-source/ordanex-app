@@ -36,6 +36,10 @@ function resolveClientId(explicitClientId?: string) {
   return parts[parts.length - 1] || "";
 }
 
+function buyerAccessStorageKey(clientId: string) {
+  return `ordanex_buyer_access_${clientId}`;
+}
+
 function money(value: number, currency = "USD") {
   return new Intl.NumberFormat("en-US", {
     style: "currency",
@@ -155,6 +159,8 @@ export default function BuyerPortalPage({ clientId: propClientId }: Props) {
   const clientId = useMemo(() => resolveClientId(propClientId), [propClientId]);
   const [accessState, setAccessState] = useState<any>(null);
   const [accessLoading, setAccessLoading] = useState(true);
+  const [approvalChecking, setApprovalChecking] = useState(false);
+  const [approvedBuyerEmail, setApprovedBuyerEmail] = useState("");
   const [catalog, setCatalog] = useState<BuyerPortalCatalogItem[]>([]);
   const [cart, setCart] = useState<CartLine[]>([]);
   const [search, setSearch] = useState("");
@@ -187,8 +193,22 @@ export default function BuyerPortalPage({ clientId: propClientId }: Props) {
       return;
     }
     setAccessLoading(true);
-    fetchBuyerAccess(clientId)
-      .then((state) => setAccessState(state))
+    const savedBuyerEmail =
+      typeof window !== "undefined"
+        ? window.sessionStorage.getItem(buyerAccessStorageKey(clientId)) || ""
+        : "";
+    if (savedBuyerEmail) {
+      setBuyerEmail(savedBuyerEmail);
+    }
+    fetchBuyerAccess(clientId, savedBuyerEmail || undefined)
+      .then((state) => {
+        setAccessState(state);
+        if (savedBuyerEmail && state?.buyer_approved) {
+          setApprovedBuyerEmail(savedBuyerEmail.trim().toLowerCase());
+        } else if (typeof window !== "undefined") {
+          window.sessionStorage.removeItem(buyerAccessStorageKey(clientId));
+        }
+      })
       .catch((err: any) => {
         setAccessState({ client_id: clientId, buyer_storefront: false });
         setBanner(err?.message || "Buyer storefront access is not enabled for this client.");
@@ -197,16 +217,16 @@ export default function BuyerPortalPage({ clientId: propClientId }: Props) {
   }, [clientId]);
 
   useEffect(() => {
-    if (!clientId || accessLoading || !accessState?.buyer_storefront) return;
+    if (!clientId || accessLoading || !accessState?.buyer_storefront || !approvedBuyerEmail) return;
     fetchBuyerPortalSettings(clientId)
       .then((settings) => setPortalSettings(settings || null))
       .catch((err: any) => setBanner(err?.message || "Failed to load storefront settings."));
-  }, [clientId, accessLoading, accessState?.buyer_storefront]);
+  }, [clientId, accessLoading, accessState?.buyer_storefront, approvedBuyerEmail]);
 
   useEffect(() => {
-    if (!clientId || accessLoading || !accessState?.buyer_storefront) return;
+    if (!clientId || accessLoading || !accessState?.buyer_storefront || !approvedBuyerEmail) return;
     setLoading(true);
-    Promise.all([fetchBuyerCatalog(clientId), fetchBuyerOrders(clientId)])
+    Promise.all([fetchBuyerCatalog(clientId, approvedBuyerEmail), fetchBuyerOrders(clientId, approvedBuyerEmail)])
       .then(([catalogRows, orders]) => {
         setCatalog(Array.isArray(catalogRows) ? catalogRows : []);
         setRecentOrders(Array.isArray(orders) ? orders : []);
@@ -215,7 +235,7 @@ export default function BuyerPortalPage({ clientId: propClientId }: Props) {
       })
       .catch((err: any) => setBanner(err?.message || "Failed to load storefront data."))
       .finally(() => setLoading(false));
-  }, [clientId, accessLoading, accessState?.buyer_storefront]);
+  }, [clientId, accessLoading, accessState?.buyer_storefront, approvedBuyerEmail]);
 
   const categories = useMemo(
     () => ["All", ...Array.from(new Set(catalog.map((item) => item.category).filter(Boolean) as string[]))],
@@ -298,6 +318,7 @@ export default function BuyerPortalPage({ clientId: propClientId }: Props) {
 
   const galleryActiveMedia =
     galleryMedia.length > 0 ? galleryMedia[Math.min(galleryIndex, galleryMedia.length - 1)] : null;
+  const mediaWatermarkLabel = approvedBuyerEmail || buyerEmail || "Approved buyer";
 
   function addToCart(item: BuyerPortalCatalogItem) {
     setCart((current) => {
@@ -362,9 +383,63 @@ export default function BuyerPortalPage({ clientId: propClientId }: Props) {
     setGalleryIndex(0);
   }
 
+  async function verifyBuyerAccess() {
+    const normalizedEmail = buyerEmail.trim().toLowerCase();
+    if (!clientId) {
+      setBanner("Missing client id in the storefront URL.");
+      return;
+    }
+    if (!normalizedEmail) {
+      setBanner("Enter your approved buyer email to access protected supplier media and catalog details.");
+      return;
+    }
+    try {
+      setApprovalChecking(true);
+      const state = await fetchBuyerAccess(clientId, normalizedEmail);
+      setAccessState(state);
+      if (!state?.buyer_approved) {
+        throw new Error(state?.access_message || "This buyer email is not approved for the storefront.");
+      }
+      setApprovedBuyerEmail(normalizedEmail);
+      setBuyerEmail(normalizedEmail);
+      if (typeof window !== "undefined") {
+        window.sessionStorage.setItem(buyerAccessStorageKey(clientId), normalizedEmail);
+      }
+      setBanner(`Access approved for ${normalizedEmail}. Protected catalog media is now enabled for this session.`);
+    } catch (err: any) {
+      setApprovedBuyerEmail("");
+      setCatalog([]);
+      setRecentOrders([]);
+      setSubmittedOrder(null);
+      if (typeof window !== "undefined") {
+        window.sessionStorage.removeItem(buyerAccessStorageKey(clientId));
+      }
+      setBanner(err?.message || "Unable to verify buyer access.");
+    } finally {
+      setApprovalChecking(false);
+    }
+  }
+
+  function resetBuyerAccess() {
+    setApprovedBuyerEmail("");
+    setBuyerEmail("");
+    setCatalog([]);
+    setRecentOrders([]);
+    setSubmittedOrder(null);
+    setGalleryProduct(null);
+    setGalleryIndex(0);
+    if (typeof window !== "undefined" && clientId) {
+      window.sessionStorage.removeItem(buyerAccessStorageKey(clientId));
+    }
+  }
+
   async function placeOrder() {
     if (!clientId) {
       setBanner("Missing client id in the storefront URL.");
+      return;
+    }
+    if (!approvedBuyerEmail) {
+      setBanner("Verify your approved buyer email before placing an order.");
       return;
     }
     if (!buyerName.trim() || !buyerEmail.trim() || !cart.length) {
@@ -377,7 +452,7 @@ export default function BuyerPortalPage({ clientId: propClientId }: Props) {
       const order = await submitBuyerOrder({
         client_id: clientId,
         buyer_name: buyerName,
-        buyer_email: buyerEmail,
+        buyer_email: approvedBuyerEmail,
         company_name: companyName || undefined,
         sold_to: companyName || buyerName,
         ship_to: shipTo || undefined,
@@ -421,7 +496,7 @@ export default function BuyerPortalPage({ clientId: propClientId }: Props) {
         payment_proof_url: refreshed.payment_proof_url || orderWithProof.payment_proof_url,
         payment_proof_data_url: refreshed.payment_proof_data_url || orderWithProof.payment_proof_data_url,
       });
-      const history = await fetchBuyerOrders(clientId, buyerEmail);
+      const history = await fetchBuyerOrders(clientId, approvedBuyerEmail);
       setRecentOrders(Array.isArray(history) ? history : []);
     } catch (err: any) {
       setBanner(err?.message || "Failed to place order.");
@@ -449,6 +524,55 @@ export default function BuyerPortalPage({ clientId: propClientId }: Props) {
     );
   }
 
+  if (!approvedBuyerEmail) {
+    return (
+      <div style={shell}>
+        <div style={{ maxWidth: 1440, margin: "0 auto", padding: "24px 18px 40px" }}>
+          {banner ? (
+            <div style={{ ...panel, borderColor: "#c7d2fe", background: "#eff6ff", color: "#1d4ed8", padding: 14, marginBottom: 16, fontWeight: 700 }}>
+              {banner}
+            </div>
+          ) : null}
+          <section style={{ ...panel, padding: 28, display: "grid", gap: 18, maxWidth: 720 }}>
+            <div>
+              <div style={{ fontSize: 14, fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase", color: "#2563eb" }}>
+                Protected Supplier Catalog
+              </div>
+              <div style={{ fontSize: 28, fontWeight: 900, color: "#0f172a", marginTop: 8 }}>
+                Enter your approved buyer email to view secure product media.
+              </div>
+              <div style={{ marginTop: 10, color: "#475569", lineHeight: 1.7 }}>
+                Sensitive supplier images and videos are only streamed to approved buyers. Ordanex does not expose direct product-media download links in the storefront session.
+              </div>
+            </div>
+            <div style={{ display: "grid", gap: 12, maxWidth: 440 }}>
+              <input
+                style={field}
+                placeholder="Approved buyer email"
+                value={buyerEmail}
+                onChange={(e) => setBuyerEmail(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    void verifyBuyerAccess();
+                  }
+                }}
+              />
+              <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+                <button type="button" onClick={() => void verifyBuyerAccess()} style={primaryButton}>
+                  {approvalChecking ? "Verifying..." : "Verify access"}
+                </button>
+              </div>
+              <div style={mutedText}>
+                {accessState?.access_message || "Only approved buyer emails can access this storefront."}
+              </div>
+            </div>
+          </section>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div style={shell}>
       <div style={{ maxWidth: 1440, margin: "0 auto", padding: "24px 18px 40px" }}>
@@ -456,6 +580,13 @@ export default function BuyerPortalPage({ clientId: propClientId }: Props) {
           <div style={{ fontSize: 34, fontWeight: 900, color: "#0f172a" }}>{storefrontTitle}</div>
           <div style={{ marginTop: 8, color: "#64748b", lineHeight: 1.6 }}>
             Browse the catalog, place a buyer order, and track supplier and ERP status from one place.
+          </div>
+          <div style={{ marginTop: 10, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+            <span style={{ ...heroPill, background: "#dbeafe", color: "#1d4ed8" }}>Protected media session</span>
+            <span style={{ ...heroPill, background: "#eff6ff", color: "#1e3a8a" }}>{approvedBuyerEmail}</span>
+            <button type="button" onClick={resetBuyerAccess} style={ghostButton}>
+              Switch buyer email
+            </button>
           </div>
         </div>
 
@@ -484,7 +615,7 @@ export default function BuyerPortalPage({ clientId: propClientId }: Props) {
             <div style={{ ...panel, padding: 18, display: "grid", gap: 12 }}>
               <div style={sectionLabel}>Buyer details</div>
               <input style={field} placeholder="Buyer name" value={buyerName} onChange={(e) => setBuyerName(e.target.value)} />
-              <input style={field} placeholder="Buyer email" value={buyerEmail} onChange={(e) => setBuyerEmail(e.target.value)} />
+              <input style={{ ...field, background: "#f8fafc" }} placeholder="Buyer email" value={buyerEmail} readOnly />
               <input style={field} placeholder="Company name" value={companyName} onChange={(e) => setCompanyName(e.target.value)} />
               <input style={field} placeholder="Ship-to name" value={shipTo} onChange={(e) => setShipTo(e.target.value)} />
               <input style={field} placeholder="Ship-to address" value={shipToAddress} onChange={(e) => setShipToAddress(e.target.value)} />
@@ -594,18 +725,43 @@ export default function BuyerPortalPage({ clientId: propClientId }: Props) {
                     <div style={productMediaShell}>
                       {heroMedia ? (
                         heroMedia.kind === "video" ? (
-                          <div style={productMediaInteractive} onClick={() => openGallery(item, activeIndex)} role="button" tabIndex={0}
+                          <div
+                            style={productMediaInteractive}
+                            onClick={() => openGallery(item, activeIndex)}
+                            onContextMenu={(e) => e.preventDefault()}
+                            role="button"
+                            tabIndex={0}
                             onKeyDown={(e) => {
                               if (e.key === "Enter" || e.key === " ") {
                                 e.preventDefault();
                                 openGallery(item, activeIndex);
                               }
-                            }}>
-                            <video src={heroMedia.url} controls style={productVideo} />
+                            }}
+                          >
+                            <video
+                              src={heroMedia.url}
+                              controls
+                              disablePictureInPicture
+                              style={productVideo}
+                              onContextMenu={(e) => e.preventDefault()}
+                            />
+                            <div style={mediaWatermark}>{mediaWatermarkLabel}</div>
                           </div>
                         ) : (
-                          <button type="button" style={mediaOpenButton} onClick={() => openGallery(item, activeIndex)}>
-                            <img src={heroMedia.url} alt={item.name} style={productImage} />
+                          <button
+                            type="button"
+                            style={mediaOpenButton}
+                            onClick={() => openGallery(item, activeIndex)}
+                            onContextMenu={(e) => e.preventDefault()}
+                          >
+                            <img
+                              src={heroMedia.url}
+                              alt={item.name}
+                              style={productImage}
+                              draggable={false}
+                              onContextMenu={(e) => e.preventDefault()}
+                            />
+                            <div style={mediaWatermark}>{mediaWatermarkLabel}</div>
                           </button>
                         )
                       ) : (
@@ -841,9 +997,28 @@ export default function BuyerPortalPage({ clientId: propClientId }: Props) {
             </div>
             <div style={galleryStage}>
               {galleryActiveMedia.kind === "video" ? (
-                <video src={galleryActiveMedia.url} controls autoPlay style={galleryVideo} />
+                <div style={galleryMediaStage}>
+                  <video
+                    src={galleryActiveMedia.url}
+                    controls
+                    autoPlay
+                    disablePictureInPicture
+                    style={galleryVideo}
+                    onContextMenu={(e) => e.preventDefault()}
+                  />
+                  <div style={galleryWatermark}>{mediaWatermarkLabel}</div>
+                </div>
               ) : (
-                <img src={galleryActiveMedia.url} alt={galleryProduct.name} style={galleryImage} />
+                <div style={galleryMediaStage}>
+                  <img
+                    src={galleryActiveMedia.url}
+                    alt={galleryProduct.name}
+                    style={galleryImage}
+                    draggable={false}
+                    onContextMenu={(e) => e.preventDefault()}
+                  />
+                  <div style={galleryWatermark}>{mediaWatermarkLabel}</div>
+                </div>
               )}
             </div>
             {galleryMedia.length > 1 ? (
@@ -862,7 +1037,13 @@ export default function BuyerPortalPage({ clientId: propClientId }: Props) {
                     {entry.kind === "video" ? (
                       <div style={galleryVideoLabel}>Video</div>
                     ) : (
-                      <img src={entry.url} alt={entry.label || galleryProduct.name} style={galleryThumbImage} />
+                      <img
+                        src={entry.url}
+                        alt={entry.label || galleryProduct.name}
+                        style={galleryThumbImage}
+                        draggable={false}
+                        onContextMenu={(e) => e.preventDefault()}
+                      />
                     )}
                   </button>
                 ))}
@@ -1111,12 +1292,15 @@ const productMediaShell: React.CSSProperties = {
   display: "flex",
   alignItems: "center",
   justifyContent: "center",
+  position: "relative",
+  overflow: "hidden",
 };
 
 const productMediaInteractive: React.CSSProperties = {
   width: "100%",
   display: "block",
   cursor: "pointer",
+  position: "relative",
 };
 
 const mediaOpenButton: React.CSSProperties = {
@@ -1127,6 +1311,7 @@ const mediaOpenButton: React.CSSProperties = {
   width: "100%",
   display: "block",
   cursor: "zoom-in",
+  position: "relative",
 };
 
 const productImage: React.CSSProperties = {
@@ -1147,6 +1332,24 @@ const productMediaEmpty: React.CSSProperties = {
   color: "#64748b",
   fontSize: 13,
   fontWeight: 700,
+};
+
+const mediaWatermark: React.CSSProperties = {
+  position: "absolute",
+  right: 12,
+  bottom: 12,
+  padding: "6px 10px",
+  borderRadius: 999,
+  background: "rgba(15, 23, 42, 0.68)",
+  color: "#fff",
+  fontSize: 11,
+  fontWeight: 800,
+  letterSpacing: "0.01em",
+  pointerEvents: "none",
+  maxWidth: "calc(100% - 24px)",
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
 };
 
 const productBody: React.CSSProperties = {
@@ -1429,12 +1632,23 @@ const galleryStage: React.CSSProperties = {
   minHeight: 320,
 };
 
+const galleryMediaStage: React.CSSProperties = {
+  width: "100%",
+  position: "relative",
+};
+
 const galleryImage: React.CSSProperties = {
   width: "100%",
   maxHeight: "70vh",
   objectFit: "contain",
   display: "block",
   background: "#0f172a",
+};
+
+const galleryWatermark: React.CSSProperties = {
+  ...mediaWatermark,
+  right: 18,
+  bottom: 18,
 };
 
 const galleryVideo: React.CSSProperties = {

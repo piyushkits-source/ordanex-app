@@ -528,50 +528,25 @@ export default function ClientStorefrontSection({ client, onBanner }: Props) {
     }
   }
 
-  function downloadCatalogTemplate() {
-    const templateRows = [
-      {
-        sku: "SKU-1001",
-        name: "Industrial Product",
-        description: "Short description",
-        details: "Longer commerce description",
-        category: "Adhesives",
-        brand: "Ordanex",
-        unit_price: 125.5,
-        currency: "USD",
-        uom: "EA",
-        stock_status: "Available",
-        lead_time: "2-3 days",
-        min_order_qty: 10,
-        moq_uom: "EA",
-        payment_terms: "Net 30",
-        image_url: "https://cdn.example.com/products/sku-1001.jpg",
-        video_url: "https://cdn.example.com/products/sku-1001.mp4",
-        media_urls: "https://cdn.example.com/products/sku-1001-alt.jpg, https://cdn.example.com/products/sku-1001-demo.mp4",
-        specifications: "Color: Blue; Size: Medium",
-      },
-    ];
-    const headers = Object.keys(templateRows[0]);
-    const csv = [
-      headers.join(","),
-      ...templateRows.map((row) =>
-        headers
-          .map((header) => {
-            const raw = String((row as Record<string, unknown>)[header] ?? "");
-            return /[",\n]/.test(raw) ? `"${raw.replace(/"/g, '""')}"` : raw;
-          })
-          .join(","),
-      ),
-    ].join("\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const url = window.URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = "ordanex-storefront-catalog-template.csv";
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    window.URL.revokeObjectURL(url);
+  async function downloadCatalogTemplate() {
+    try {
+      const res = await apiFetch(`${API}/storefront/catalog-template`);
+      if (!res.ok) {
+        throw new Error(await parseApiError(res));
+      }
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "ordanex-storefront-catalog-template.xlsx";
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+      onBanner("Protected storefront catalog template downloaded.", "success");
+    } catch (err: any) {
+      onBanner(err?.message || "Failed to download the storefront template.", "error");
+    }
   }
 
   async function handleMediaUpload(event: ChangeEvent<HTMLInputElement>) {
@@ -967,7 +942,7 @@ export default function ClientStorefrontSection({ client, onBanner }: Props) {
             <div>
               <div style={fieldLabel}>Catalog JSON</div>
               <div style={helper}>
-                Each item can include `image_url`, `video_url`, and a `media` array. Import files can also use `media_urls`.
+                Each item can include `image_url`, `video_url`, and a `media` array. Import files can also use `media_urls`. If you upload assets in Ordanex, reuse the returned file URL pattern like `/files/&lt;file_id&gt;/download`.
               </div>
             </div>
             <div style={inlineActions}>
@@ -985,7 +960,7 @@ export default function ClientStorefrontSection({ client, onBanner }: Props) {
                   }}
                 />
               </label>
-              <button type="button" onClick={downloadCatalogTemplate} style={button}>
+              <button type="button" onClick={() => void downloadCatalogTemplate()} style={button}>
                 Download template
               </button>
             </div>
@@ -1008,7 +983,7 @@ export default function ClientStorefrontSection({ client, onBanner }: Props) {
             <div>
               <div style={fieldLabel}>Product media manager</div>
               <div style={helper}>
-                Suppliers can add product images and short videos directly here. Large media should use hosted URLs in the catalog instead of embedded uploads.
+                Suppliers can add product images and short videos directly here. After upload, copy the generated Ordanex file URL into `image_url`, `video_url`, or `media_urls` when you want the same asset referenced in imports or JSON. Large media can use externally hosted HTTPS URLs instead.
               </div>
             </div>
             <div style={inlineActions}>
@@ -1051,9 +1026,10 @@ export default function ClientStorefrontSection({ client, onBanner }: Props) {
               </select>
               <div style={mediaGuidanceBox}>
                 <div style={guidanceTitle}>Supported ways to add media</div>
-                <div style={helper}>1. Upload image/video files directly for lightweight assets.</div>
-                <div style={helper}>2. Use `image_url`, `video_url`, or `media` in Catalog JSON for CDN-hosted assets.</div>
-                <div style={helper}>3. Include `image_url`, `video_url`, and `media_urls` in CSV or Excel imports.</div>
+                <div style={helper}>1. Upload image/video files here for lightweight product media. Ordanex will generate a reusable URL like `/files/&lt;file_id&gt;/download`.</div>
+                <div style={helper}>2. Paste that Ordanex URL into `image_url`, `video_url`, `media`, or `media_urls` if the asset should also appear in JSON imports, CSV, or Excel uploads.</div>
+                <div style={helper}>3. If assets already live outside Ordanex, use a direct public `https://...` media URL instead.</div>
+                <div style={helper}>4. Download the protected template so business users keep the upload headers unchanged.</div>
               </div>
             </div>
 
@@ -1082,6 +1058,9 @@ export default function ClientStorefrontSection({ client, onBanner }: Props) {
                           <div style={mediaMeta}>
                             <div style={mediaTypePill}>{entry.kind === "image" ? "Image" : "Video"}</div>
                             <div style={mediaLabel}>{entry.label || "Uploaded asset"}</div>
+                            <div style={{ ...helper, wordBreak: "break-all" }}>
+                              Use this URL in template or JSON: {entry.url}
+                            </div>
                             <button type="button" onClick={() => removeMediaItem(entry.url)} style={linkButton}>
                               Remove
                             </button>
@@ -1300,8 +1279,10 @@ export default function ClientStorefrontSection({ client, onBanner }: Props) {
               </div>
               <div style={fieldCard}>
                 <div style={fieldLabel}>Primary image URL</div>
+                <div style={helper}>Paste an Ordanex upload URL like `/files/&lt;file_id&gt;/download` or a public HTTPS image URL.</div>
                 <input
                   style={input}
+                  placeholder="/files/<file_id>/download or https://media.yourdomain.com/catalog/sku-1001.jpg"
                   value={selectedCatalogItem.image_url || ""}
                   onChange={(e) =>
                     upsertSelectedCatalogItem((item) => ({
@@ -1313,8 +1294,10 @@ export default function ClientStorefrontSection({ client, onBanner }: Props) {
               </div>
               <div style={fieldCard}>
                 <div style={fieldLabel}>Primary video URL</div>
+                <div style={helper}>Paste an Ordanex upload URL or a public HTTPS MP4/WebM URL for the product demo.</div>
                 <input
                   style={input}
+                  placeholder="/files/<file_id>/download or https://media.yourdomain.com/catalog/sku-1001-demo.mp4"
                   value={selectedCatalogItem.video_url || ""}
                   onChange={(e) =>
                     upsertSelectedCatalogItem((item) => ({

@@ -73,3 +73,13 @@ def get_settings(
     db: Session = Depends(get_db),
 ):
     return buyer_portal_service.get_settings(db, client_id)
+
+
+@router.get("/media/{file_id}")
+def get_protected_media(
+    file_id: UUID,
+    client_id: str = Query(...),
+    buyer_email: str = Query(...),
+    db: Session = Depends(get_db),
+):
+    return buyer_portal_service.get_catalog_media(db, file_id, client_id, buyer_email)

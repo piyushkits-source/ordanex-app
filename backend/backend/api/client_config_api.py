@@ -1,11 +1,15 @@
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import Response
 from datetime import datetime
+from io import BytesIO
 from typing import Any
 import base64
 import json
 import time
 import urllib.error
 import urllib.request
+from openpyxl import Workbook
+from openpyxl.styles import Alignment, Font, PatternFill, Protection
 from sqlalchemy.orm import Session
 from backend.db.database import get_db
 from backend.db import models, schemas
@@ -267,6 +271,233 @@ def _parse_records_synced(response_bytes: bytes, content_type: str) -> int:
                 return len(value)
         return 1
     return 0
+
+
+STOREFRONT_TEMPLATE_HEADERS = [
+    "sku",
+    "name",
+    "description",
+    "details",
+    "category",
+    "brand",
+    "unit_price",
+    "currency",
+    "uom",
+    "stock_status",
+    "lead_time",
+    "min_order_qty",
+    "moq_uom",
+    "payment_terms",
+    "image_url",
+    "video_url",
+    "media_urls",
+    "specifications",
+]
+
+STOREFRONT_TEMPLATE_SAMPLE_ROW = {
+    "sku": "SKU-1001",
+    "name": "Industrial Product",
+    "description": "Short buyer-facing summary",
+    "details": "Longer storefront description for product pages and approvals.",
+    "category": "Industrial Supplies",
+    "brand": "Supplier Brand",
+    "unit_price": 125.50,
+    "currency": "USD",
+    "uom": "EA",
+    "stock_status": "Available",
+    "lead_time": "2-3 business days",
+    "min_order_qty": 10,
+    "moq_uom": "EA",
+    "payment_terms": "Net 30",
+    "image_url": "/files/<file_id>/download",
+    "video_url": "https://media.yourdomain.com/catalog/sku-1001-demo.mp4",
+    "media_urls": "/files/<file_id>/download, https://media.yourdomain.com/catalog/sku-1001-alt.jpg",
+    "specifications": "Color: Blue; Size: Medium; Material: Polymer",
+}
+
+STOREFRONT_TEMPLATE_GUIDANCE = [
+    (
+        "sku",
+        "Yes",
+        "Unique product code used in the storefront and uploads.",
+        "Uppercase code or your internal SKU format.",
+        "SKU-1001",
+    ),
+    (
+        "name",
+        "Yes",
+        "Buyer-facing product name.",
+        "Short title.",
+        "Industrial Product",
+    ),
+    (
+        "description",
+        "No",
+        "Short summary shown in cards and previews.",
+        "Plain text.",
+        "Short buyer-facing summary",
+    ),
+    (
+        "details",
+        "No",
+        "Detailed product description for the storefront page.",
+        "Plain text.",
+        "Longer storefront description for product pages and approvals.",
+    ),
+    (
+        "unit_price",
+        "No",
+        "Numeric selling price.",
+        "Number only.",
+        "125.50",
+    ),
+    (
+        "currency",
+        "No",
+        "3-letter ISO currency code.",
+        "ISO code.",
+        "USD",
+    ),
+    (
+        "image_url",
+        "No",
+        "Primary product image URL.",
+        "Use an Ordanex upload URL like /files/<file_id>/download or a public HTTPS URL.",
+        "/files/abc123/download",
+    ),
+    (
+        "video_url",
+        "No",
+        "Primary product video URL.",
+        "Use an Ordanex upload URL or a public HTTPS MP4/WebM URL.",
+        "https://media.yourdomain.com/catalog/sku-1001-demo.mp4",
+    ),
+    (
+        "media_urls",
+        "No",
+        "Additional gallery media URLs.",
+        "Comma-separated list of Ordanex file URLs or public HTTPS URLs.",
+        "/files/abc123/download, https://media.yourdomain.com/catalog/sku-1001-alt.jpg",
+    ),
+    (
+        "specifications",
+        "No",
+        "Attribute list shown to buyers.",
+        "Separate entries with semicolons using Key: Value format.",
+        "Color: Blue; Size: Medium",
+    ),
+]
+
+
+def _build_storefront_catalog_template() -> bytes:
+    workbook = Workbook()
+    catalog_sheet = workbook.active
+    catalog_sheet.title = "Catalog Upload"
+    guidance_sheet = workbook.create_sheet("Field Guidance")
+
+    header_fill = PatternFill(fill_type="solid", fgColor="D9E7FF")
+    header_font = Font(bold=True, color="153E8A")
+    wrapped_alignment = Alignment(wrap_text=True, vertical="top")
+
+    for column_index, header in enumerate(STOREFRONT_TEMPLATE_HEADERS, start=1):
+        cell = catalog_sheet.cell(row=1, column=column_index, value=header)
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = wrapped_alignment
+        cell.protection = Protection(locked=True)
+
+        sample_cell = catalog_sheet.cell(
+            row=2,
+            column=column_index,
+            value=STOREFRONT_TEMPLATE_SAMPLE_ROW.get(header, ""),
+        )
+        sample_cell.alignment = wrapped_alignment
+        sample_cell.protection = Protection(locked=False)
+
+    # Keep a reasonable number of editable rows ready for business users.
+    for row_index in range(3, 203):
+        for column_index in range(1, len(STOREFRONT_TEMPLATE_HEADERS) + 1):
+            catalog_sheet.cell(row=row_index, column=column_index).protection = Protection(locked=False)
+
+    catalog_sheet.freeze_panes = "A2"
+    catalog_sheet.auto_filter.ref = f"A1:R202"
+    catalog_sheet.sheet_view.showGridLines = True
+    catalog_sheet.protection.sheet = True
+    catalog_sheet.protection.sort = True
+    catalog_sheet.protection.autoFilter = True
+    catalog_sheet.protection.selectLockedCells = True
+    catalog_sheet.protection.selectUnlockedCells = True
+
+    catalog_widths = {
+        "A": 18,
+        "B": 26,
+        "C": 28,
+        "D": 42,
+        "E": 20,
+        "F": 18,
+        "G": 14,
+        "H": 12,
+        "I": 12,
+        "J": 18,
+        "K": 18,
+        "L": 14,
+        "M": 12,
+        "N": 18,
+        "O": 42,
+        "P": 42,
+        "Q": 52,
+        "R": 34,
+    }
+    for column_letter, width in catalog_widths.items():
+        catalog_sheet.column_dimensions[column_letter].width = width
+
+    guidance_sheet.append(
+        [
+            "Header",
+            "Required",
+            "What to enter",
+            "Accepted format",
+            "Example",
+        ]
+    )
+    for cell in guidance_sheet[1]:
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = wrapped_alignment
+        cell.protection = Protection(locked=True)
+
+    guidance_rows = [
+        (
+            "Media workflow",
+            "",
+            "Upload product images or videos inside the Ordanex Product media manager first, then copy the returned file URL into image_url, video_url, or media_urls. Ordanex stores the file behind the scenes and exposes a reusable URL like /files/<file_id>/download.",
+            "Use Ordanex file URLs or public HTTPS URLs.",
+            "/files/abc123/download",
+        ),
+        (
+            "Header protection",
+            "",
+            "The first row is intentionally locked so upload headers stay unchanged.",
+            "Enter product data from row 2 onward only.",
+            "Replace or extend the sample row.",
+        ),
+    ]
+    for row in guidance_rows + STOREFRONT_TEMPLATE_GUIDANCE:
+        guidance_sheet.append(row)
+
+    for row in guidance_sheet.iter_rows():
+        for cell in row:
+            cell.alignment = wrapped_alignment
+
+    for column_letter, width in {"A": 24, "B": 12, "C": 52, "D": 56, "E": 40}.items():
+        guidance_sheet.column_dimensions[column_letter].width = width
+
+    guidance_sheet.freeze_panes = "A2"
+    guidance_sheet.protection.sheet = True
+
+    buffer = BytesIO()
+    workbook.save(buffer)
+    return buffer.getvalue()
 
 
 
@@ -1048,4 +1279,15 @@ def create_sync_event(payload: schemas.ClientSyncEventCreate, db: Session = Depe
     db.commit()
     db.refresh(row)
     return row
+
+
+@router.get("/storefront/catalog-template")
+def download_storefront_catalog_template():
+    return Response(
+        content=_build_storefront_catalog_template(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": 'attachment; filename="ordanex-storefront-catalog-template.xlsx"'
+        },
+    )
 

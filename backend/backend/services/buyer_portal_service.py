@@ -3,16 +3,24 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, datetime
 import json
+import re
 from typing import Any
+from urllib.parse import quote
 from uuid import uuid4
 
 from fastapi import HTTPException, status
+from fastapi.responses import FileResponse, Response
 from sqlalchemy.orm import Session, joinedload
 
 from backend.core.deps import UserContext
 from backend.db import models, schemas
 from backend.services.purchase_order_service import purchase_order_service
 from backend.services.entitlement_service import get_client_entitlements, has_buyer_storefront_access
+from backend.services.file_storage_service import (
+    is_s3_storage_path,
+    read_stored_file,
+    resolve_local_file_path,
+)
 
 DEFAULT_CATALOG = [
     {
@@ -150,6 +158,10 @@ DEFAULT_STOREFRONT_SETTINGS = {
         "approved_buyers": [],
     },
 }
+
+INTERNAL_MEDIA_URL_RE = re.compile(
+    r"^(?:https?://[^/]+)?/files/([0-9a-fA-F-]{36})/download/?(?:\?.*)?$"
+)
 
 
 @dataclass
@@ -439,17 +451,71 @@ class BuyerPortalService:
                 return [item for item in items if isinstance(item, dict)]
         return []
 
+    def _protected_media_url(self, raw_url: Any, client_id: str, buyer_email: str) -> str | None:
+        text = str(raw_url or "").strip()
+        if not text:
+            return None
+        match = INTERNAL_MEDIA_URL_RE.match(text)
+        if not match:
+            return text
+        file_id = match.group(1)
+        encoded_client = quote(client_id, safe="")
+        encoded_email = quote(buyer_email, safe="")
+        return f"/buyer-portal/media/{file_id}?client_id={encoded_client}&buyer_email={encoded_email}"
+
+    def _protect_catalog_media(self, item: dict[str, Any], client_id: str, buyer_email: str) -> dict[str, Any]:
+        protected = dict(item)
+        protected_image = self._protected_media_url(protected.get("image_url"), client_id, buyer_email)
+        protected_video = self._protected_media_url(protected.get("video_url"), client_id, buyer_email)
+        if protected_image:
+            protected["image_url"] = protected_image
+        if protected_video:
+            protected["video_url"] = protected_video
+
+        media = protected.get("media")
+        if isinstance(media, list):
+            next_media: list[dict[str, Any]] = []
+            for entry in media:
+                if not isinstance(entry, dict):
+                    continue
+                next_entry = dict(entry)
+                protected_url = self._protected_media_url(next_entry.get("url"), client_id, buyer_email)
+                protected_poster = self._protected_media_url(next_entry.get("poster_url"), client_id, buyer_email)
+                if protected_url:
+                    next_entry["url"] = protected_url
+                if protected_poster:
+                    next_entry["poster_url"] = protected_poster
+                next_media.append(next_entry)
+            protected["media"] = next_media
+
+        return protected
+
     def get_catalog(self, db: Session, client_id: str, buyer_email: str | None = None) -> list[dict[str, Any]]:
-        self.assert_buyer_authorized(db, client_id, buyer_email)
+        access_state = self.assert_buyer_authorized(db, client_id, buyer_email)
+        approved_email = str(access_state.get("buyer_email") or buyer_email or "").strip().lower()
         supplier_name = self._client_name(db, client_id) or "Configured Supplier"
         settings_row = self._settings_row(db, client_id)
         if settings_row:
             settings = self._settings_payload(settings_row)
             catalog = self._normalize_catalog(settings.get("catalog"))
             if catalog:
-                return [{**item, "supplier_name": supplier_name} for item in catalog]
+                return [
+                    self._protect_catalog_media(
+                        {**item, "supplier_name": supplier_name},
+                        client_id,
+                        approved_email,
+                    )
+                    for item in catalog
+                ]
             if str(settings.get("catalog", {}).get("source_mode") or "").strip().upper() == "PLATFORM_MANAGED":
-                return [{**item, "supplier_name": supplier_name} for item in DEFAULT_CATALOG]
+                return [
+                    self._protect_catalog_media(
+                        {**item, "supplier_name": supplier_name},
+                        client_id,
+                        approved_email,
+                    )
+                    for item in DEFAULT_CATALOG
+                ]
         cfg = (
             db.query(models.ClientConfig)
             .filter(
@@ -462,12 +528,66 @@ class BuyerPortalService:
             .first()
         )
         if not cfg:
-            return DEFAULT_CATALOG
+            return [
+                self._protect_catalog_media(
+                    {**item, "supplier_name": supplier_name},
+                    client_id,
+                    approved_email,
+                )
+                for item in DEFAULT_CATALOG
+            ]
 
         catalog = self._normalize_catalog(cfg.config_value_json)
         final_catalog = catalog or DEFAULT_CATALOG
         supplier_name = self._client_name(db, client_id) or "Configured Supplier"
-        return [{**item, "supplier_name": supplier_name} for item in final_catalog]
+        return [
+            self._protect_catalog_media(
+                {**item, "supplier_name": supplier_name},
+                client_id,
+                approved_email,
+            )
+            for item in final_catalog
+        ]
+
+    def get_catalog_media(self, db: Session, file_id: Any, client_id: str, buyer_email: str) -> Response:
+        self.assert_buyer_authorized(db, client_id, buyer_email)
+        file_row = (
+            db.query(models.FileStore)
+            .filter(models.FileStore.file_id == file_id)
+            .filter(models.FileStore.client_id == client_id)
+            .first()
+        )
+        if not file_row:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Media not found.")
+
+        source_channel = str(file_row.source_channel or "").strip().upper()
+        raw_path = str(file_row.file_path or "").strip()
+        if source_channel != "PORTAL_CATALOG_MEDIA" or "/portal/catalog/" not in raw_path.replace("\\", "/"):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Protected media access denied.")
+
+        media_type = str(file_row.mime_type or "application/octet-stream")
+        display_name = str(file_row.original_file_name or "media")
+
+        if is_s3_storage_path(raw_path):
+            try:
+                file_bytes = read_stored_file(raw_path)
+            except FileNotFoundError:
+                raise HTTPException(status_code=status.HTTP_410_GONE, detail="Media no longer available.")
+            response: Response = Response(content=file_bytes, media_type=media_type)
+        else:
+            abs_path = resolve_local_file_path(raw_path)
+            if not abs_path.exists():
+                raise HTTPException(status_code=status.HTTP_410_GONE, detail="Media no longer available.")
+            response = FileResponse(path=str(abs_path), media_type=media_type)
+
+        response.headers["Content-Disposition"] = f'inline; filename="{display_name}"'
+        response.headers["Cache-Control"] = "private, no-store, max-age=0, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["Cross-Origin-Resource-Policy"] = "same-origin"
+        response.headers["Referrer-Policy"] = "same-origin"
+        return response
 
     def _generate_po_number(self, client_id: str) -> str:
         stamp = datetime.utcnow().strftime("%Y%m%d%H%M%S")
