@@ -543,10 +543,18 @@ export default function ClientStorefrontSection({ client, onBanner }: Props) {
       link.click();
       document.body.removeChild(link);
       window.URL.revokeObjectURL(url);
-      onBanner("Protected storefront catalog template downloaded.", "success");
+      onBanner("Storefront catalog template downloaded. Keep row 1 unchanged and enter products from row 2 onward.", "success");
     } catch (err: any) {
       onBanner(err?.message || "Failed to download the storefront template.", "error");
     }
+  }
+
+  function openMediaPicker() {
+    if (!selectedCatalogItem) {
+      onBanner("Add or import a product first, then select it before uploading image or video files.", "info");
+      return;
+    }
+    mediaInputRef.current?.click();
   }
 
   async function handleMediaUpload(event: ChangeEvent<HTMLInputElement>) {
@@ -989,11 +997,11 @@ export default function ClientStorefrontSection({ client, onBanner }: Props) {
             <div style={inlineActions}>
               <button
                 type="button"
-                onClick={() => mediaInputRef.current?.click()}
+                onClick={openMediaPicker}
                 style={button}
-                disabled={!selectedCatalogItem || mediaUploading}
+                disabled={mediaUploading}
               >
-                {mediaUploading ? "Uploading..." : "Upload image / video"}
+                {mediaUploading ? "Uploading..." : selectedCatalogItem ? "Upload image / video" : "Select a product to upload"}
               </button>
               <input
                 ref={mediaInputRef}
@@ -1001,6 +1009,7 @@ export default function ClientStorefrontSection({ client, onBanner }: Props) {
                 accept="image/*,video/*"
                 multiple
                 hidden
+                disabled={mediaUploading}
                 onChange={handleMediaUpload}
               />
             </div>
@@ -1024,12 +1033,17 @@ export default function ClientStorefrontSection({ client, onBanner }: Props) {
                   <option value="">No catalog items loaded</option>
                 )}
               </select>
+              {!catalogItems.length ? (
+                <div style={helper}>
+                  Import the Excel or CSV template, or add a product manually below, before using the media upload action.
+                </div>
+              ) : null}
               <div style={mediaGuidanceBox}>
                 <div style={guidanceTitle}>Supported ways to add media</div>
                 <div style={helper}>1. Upload image/video files here for lightweight product media. Ordanex will generate a reusable URL like `/files/&lt;file_id&gt;/download`.</div>
                 <div style={helper}>2. Paste that Ordanex URL into `image_url`, `video_url`, `media`, or `media_urls` if the asset should also appear in JSON imports, CSV, or Excel uploads.</div>
                 <div style={helper}>3. If assets already live outside Ordanex, use a direct public `https://...` media URL instead.</div>
-                <div style={helper}>4. Download the protected template so business users keep the upload headers unchanged.</div>
+                <div style={helper}>4. Download the template, keep row 1 unchanged, and paste product data from row 2 onward.</div>
               </div>
             </div>
 
@@ -1073,7 +1087,7 @@ export default function ClientStorefrontSection({ client, onBanner }: Props) {
                   </div>
                 </div>
               ) : (
-                <div style={helper}>Import or add catalog items first, then attach product media.</div>
+                <div style={helper}>Import or add catalog items first, then select one product and attach product media.</div>
               )}
             </div>
           </div>

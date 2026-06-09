@@ -404,7 +404,6 @@ def _build_storefront_catalog_template() -> bytes:
         cell.fill = header_fill
         cell.font = header_font
         cell.alignment = wrapped_alignment
-        cell.protection = Protection(locked=True)
 
         sample_cell = catalog_sheet.cell(
             row=2,
@@ -412,21 +411,10 @@ def _build_storefront_catalog_template() -> bytes:
             value=STOREFRONT_TEMPLATE_SAMPLE_ROW.get(header, ""),
         )
         sample_cell.alignment = wrapped_alignment
-        sample_cell.protection = Protection(locked=False)
-
-    # Keep a reasonable number of editable rows ready for business users.
-    for row_index in range(3, 203):
-        for column_index in range(1, len(STOREFRONT_TEMPLATE_HEADERS) + 1):
-            catalog_sheet.cell(row=row_index, column=column_index).protection = Protection(locked=False)
 
     catalog_sheet.freeze_panes = "A2"
     catalog_sheet.auto_filter.ref = f"A1:R202"
     catalog_sheet.sheet_view.showGridLines = True
-    catalog_sheet.protection.sheet = True
-    catalog_sheet.protection.sort = True
-    catalog_sheet.protection.autoFilter = True
-    catalog_sheet.protection.selectLockedCells = True
-    catalog_sheet.protection.selectUnlockedCells = True
 
     catalog_widths = {
         "A": 18,
@@ -475,10 +463,10 @@ def _build_storefront_catalog_template() -> bytes:
             "/files/abc123/download",
         ),
         (
-            "Header protection",
+            "Header handling",
             "",
-            "The first row is intentionally locked so upload headers stay unchanged.",
-            "Enter product data from row 2 onward only.",
+            "Keep the first row unchanged and enter product data from row 2 onward. The catalog sheet stays editable so business users can paste or update products without workbook protection prompts.",
+            "Use the provided headers exactly as shown.",
             "Replace or extend the sample row.",
         ),
     ]

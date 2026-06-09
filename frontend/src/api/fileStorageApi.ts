@@ -1,4 +1,5 @@
 import { API_BASE } from "./apiClient";
+import { getAccessToken } from "../utils/auth";
 
 export type PortalFileUploadScope =
   | "catalog-media"
@@ -56,29 +57,56 @@ function normalizeRemoteUploadResponse(
   };
 }
 
+async function parseUploadError(response: Response) {
+  try {
+    const body = await response.json();
+    const detail = body?.detail || body?.message || body?.error;
+    if (typeof detail === "string" && detail.trim()) return detail.trim();
+  } catch {}
+
+  try {
+    const text = await response.text();
+    if (text.trim()) return text.trim();
+  } catch {}
+
+  return `Upload failed with status ${response.status}.`;
+}
+
 export async function uploadPortalFile(
   request: PortalFileUploadRequest,
 ): Promise<PortalFileUploadResult> {
   const form = buildUploadFormData(request);
 
   try {
+    const token = getAccessToken();
     const response = await fetch(`${API_BASE}/files/upload`, {
       method: "POST",
       body: form,
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      credentials: "include",
     });
 
-    if (response.ok) {
-      let body: any = null;
-      try {
-        body = await response.json();
-      } catch {
-        body = null;
-      }
-      const normalized = normalizeRemoteUploadResponse(body, request.file.name);
-      if (normalized) return normalized;
+    if (!response.ok) {
+      throw new Error(await parseUploadError(response));
     }
-  } catch {
-    // Safe fallback below keeps the UI usable before the backend upload service is live.
+
+    let body: any = null;
+    try {
+      body = await response.json();
+    } catch {
+      body = null;
+    }
+
+    const normalized = normalizeRemoteUploadResponse(body, request.file.name);
+    if (!normalized) {
+      throw new Error("Upload completed but Ordanex did not return a reusable file URL.");
+    }
+    return normalized;
+  } catch (error) {
+    if (!(error instanceof TypeError)) {
+      throw error;
+    }
+    // Safe fallback below keeps the UI usable when the upload service is temporarily unreachable.
   }
 
   return {
