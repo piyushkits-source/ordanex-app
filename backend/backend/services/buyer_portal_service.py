@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, datetime
 import json
+from pathlib import Path
 import re
 from typing import Any
 from urllib.parse import quote
@@ -16,11 +17,30 @@ from backend.core.deps import UserContext
 from backend.db import models, schemas
 from backend.services.purchase_order_service import purchase_order_service
 from backend.services.entitlement_service import get_client_entitlements, has_buyer_storefront_access
-from backend.services.file_storage_service import (
-    is_s3_storage_path,
-    read_stored_file,
-    resolve_local_file_path,
-)
+try:
+    from backend.services.file_storage_service import (
+        is_s3_storage_path,
+        read_stored_file,
+        resolve_local_file_path,
+    )
+except ImportError:
+    def is_s3_storage_path(file_path: str | None) -> bool:
+        return str(file_path or "").strip().lower().startswith("s3://")
+
+    def resolve_local_file_path(file_path: str | None) -> Path:
+        normalized = str(file_path or "").strip().replace("\\", "/")
+        abs_path = Path(normalized)
+        if not abs_path.is_absolute():
+            abs_path = Path.cwd() / abs_path
+        return abs_path.resolve()
+
+    def read_stored_file(file_path: str) -> bytes:
+        if is_s3_storage_path(file_path):
+            raise RuntimeError("S3-backed protected storefront media requires the latest file_storage_service deployment.")
+        abs_path = resolve_local_file_path(file_path)
+        if not abs_path.exists():
+            raise FileNotFoundError(str(abs_path))
+        return abs_path.read_bytes()
 
 DEFAULT_CATALOG = [
     {
