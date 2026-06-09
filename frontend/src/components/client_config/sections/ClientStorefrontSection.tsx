@@ -43,6 +43,14 @@ const API = "/client-config";
 const MAX_IMAGE_BYTES = 2 * 1024 * 1024;
 const MAX_VIDEO_BYTES = 8 * 1024 * 1024;
 
+function isImageFile(file: File) {
+  return file.type.startsWith("image/") || /\.(png|jpe?g|webp|gif|bmp|svg)$/i.test(file.name);
+}
+
+function isVideoFile(file: File) {
+  return file.type.startsWith("video/") || /\.(mp4|webm|ogg|mov|m4v)$/i.test(file.name);
+}
+
 function normalizeApprovedBuyerEmails(value: any) {
   if (!Array.isArray(value)) return [] as string[];
   return Array.from(
@@ -570,8 +578,8 @@ export default function ClientStorefrontSection({ client, onBanner }: Props) {
       setMediaUploading(true);
       const uploaded: CatalogMediaItem[] = [];
       for (const file of files) {
-        const isImage = file.type.startsWith("image/");
-        const isVideo = file.type.startsWith("video/");
+        const isImage = isImageFile(file);
+        const isVideo = isVideoFile(file);
         if (!isImage && !isVideo) {
           throw new Error(`Unsupported media type for ${file.name}. Use images or videos only.`);
         }
@@ -607,7 +615,13 @@ export default function ClientStorefrontSection({ client, onBanner }: Props) {
         });
       });
       updateCatalogItems(nextItems);
-      onBanner(`${uploaded.length} media file(s) added to ${selectedCatalogItem.name}.`, "success");
+      const firstUploadedUrl = uploaded[0]?.url;
+      onBanner(
+        firstUploadedUrl
+          ? `${uploaded.length} media file(s) added to ${selectedCatalogItem.name}. Primary URL: ${firstUploadedUrl}`
+          : `${uploaded.length} media file(s) added to ${selectedCatalogItem.name}.`,
+        "success",
+      );
     } catch (err: any) {
       onBanner(err?.message || "Failed to add product media.", "error");
     } finally {
