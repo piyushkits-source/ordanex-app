@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ChangeEvent } from "react";
+import { absoluteFileUrl } from "../../../api/apiClient";
 import { apiFetch, parseApiError } from "utils/api";
 import { uploadPortalFile } from "../../../api/fileStorageApi";
 
@@ -163,6 +164,10 @@ function ensureCatalogItemMedia(item: CatalogItem) {
     media.push({ kind: "video", url: item.video_url });
   }
   return { ...item, media };
+}
+
+function previewMediaUrl(url?: string | null) {
+  return absoluteFileUrl(url || "");
 }
 
 function mapCatalogRow(row: Record<string, unknown>, supplierName: string): CatalogItem | null {
@@ -1064,9 +1069,9 @@ export default function ClientStorefrontSection({ client, onBanner }: Props) {
                         <div key={entry.url} style={mediaRow}>
                           <div style={mediaPreviewFrame}>
                             {entry.kind === "image" ? (
-                              <img src={entry.url} alt={entry.label || selectedCatalogItem.name} style={mediaImage} />
+                              <img src={previewMediaUrl(entry.url)} alt={entry.label || selectedCatalogItem.name} style={mediaImage} />
                             ) : (
-                              <video src={entry.url} controls style={mediaVideo} />
+                              <video src={previewMediaUrl(entry.url)} controls style={mediaVideo} />
                             )}
                           </div>
                           <div style={mediaMeta}>
@@ -1364,9 +1369,9 @@ export default function ClientStorefrontSection({ client, onBanner }: Props) {
                     <div style={previewMediaFrame}>
                       {heroMedia ? (
                         heroMedia.kind === "video" ? (
-                          <video src={heroMedia.url} controls style={previewVideo} />
+                          <video src={previewMediaUrl(heroMedia.url)} controls style={previewVideo} />
                         ) : (
-                          <img src={heroMedia.url} alt={item.name} style={previewImage} />
+                          <img src={previewMediaUrl(heroMedia.url)} alt={item.name} style={previewImage} />
                         )
                       ) : (
                         <div style={previewMediaEmpty}>No product media yet</div>
@@ -1414,7 +1419,7 @@ export default function ClientStorefrontSection({ client, onBanner }: Props) {
                               {entry.kind === "video" ? (
                                 <div style={previewVideoThumb}>Video</div>
                               ) : (
-                                <img src={entry.url} alt={entry.label || item.name} style={previewThumbImage} />
+                                <img src={previewMediaUrl(entry.url)} alt={entry.label || item.name} style={previewThumbImage} />
                               )}
                             </div>
                           ))}
