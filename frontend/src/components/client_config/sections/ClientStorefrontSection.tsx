@@ -114,6 +114,13 @@ function parseSpecifications(value: unknown) {
   return Object.fromEntries(pairs);
 }
 
+function normalizeMediaUrl(value: unknown): string | null {
+  const text = String(value || "").trim();
+  if (!text) return null;
+  if (text.includes("<file_id>") || text.includes("<") || text.includes(">")) return null;
+  return text;
+}
+
 function specificationsToText(value: CatalogItem["specifications"]) {
   if (!value || typeof value !== "object") return "";
   return Object.entries(value)
@@ -127,19 +134,23 @@ function parseMediaList(value: unknown): CatalogMediaItem[] {
     return value
       .map((entry) => {
         if (typeof entry === "string") {
-          const lowered = entry.toLowerCase();
+          const normalizedUrl = normalizeMediaUrl(entry);
+          if (!normalizedUrl) return null;
+          const lowered = normalizedUrl.toLowerCase();
           return {
             kind: lowered.endsWith(".mp4") || lowered.includes("video")
               ? ("video" as const)
               : ("image" as const),
-            url: entry,
+            url: normalizedUrl,
           };
         }
         if (entry && typeof entry === "object" && typeof (entry as any).url === "string") {
+          const normalizedUrl = normalizeMediaUrl((entry as any).url);
+          if (!normalizedUrl) return null;
           const kind = String((entry as any).kind || "").toLowerCase() === "video" ? "video" : "image";
           return {
             kind,
-            url: String((entry as any).url),
+            url: normalizedUrl,
             label: (entry as any).label ? String((entry as any).label) : null,
             poster_url: (entry as any).poster_url ? String((entry as any).poster_url) : null,
           } as CatalogMediaItem;
@@ -155,23 +166,25 @@ function parseMediaList(value: unknown): CatalogMediaItem[] {
   } catch {}
   return text
     .split(/\r?\n|,/)
-    .map((entry) => entry.trim())
+    .map((entry) => normalizeMediaUrl(entry))
     .filter(Boolean)
     .map((url) => ({
       kind: /\.(mp4|webm|ogg)$/i.test(url) ? ("video" as const) : ("image" as const),
-      url,
+      url: String(url),
     }));
 }
 
 function ensureCatalogItemMedia(item: CatalogItem) {
   const media = parseMediaList(item.media);
-  if (item.image_url && !media.some((entry) => entry.kind === "image" && entry.url === item.image_url)) {
-    media.unshift({ kind: "image", url: item.image_url });
+  const imageUrl = normalizeMediaUrl(item.image_url);
+  const videoUrl = normalizeMediaUrl(item.video_url);
+  if (imageUrl && !media.some((entry) => entry.kind === "image" && entry.url === imageUrl)) {
+    media.unshift({ kind: "image", url: imageUrl });
   }
-  if (item.video_url && !media.some((entry) => entry.kind === "video" && entry.url === item.video_url)) {
-    media.push({ kind: "video", url: item.video_url });
+  if (videoUrl && !media.some((entry) => entry.kind === "video" && entry.url === videoUrl)) {
+    media.push({ kind: "video", url: videoUrl });
   }
-  return { ...item, media };
+  return { ...item, image_url: imageUrl, video_url: videoUrl, media };
 }
 
 function previewMediaUrl(url?: string | null) {
@@ -200,8 +213,8 @@ function mapCatalogRow(row: Record<string, unknown>, supplierName: string): Cata
   ).trim();
   if (!sku || !name) return null;
 
-  const imageUrl = String(entries.image_url || entries.image || entries.product_image || "").trim() || null;
-  const videoUrl = String(entries.video_url || entries.video || entries.product_video || "").trim() || null;
+  const imageUrl = normalizeMediaUrl(entries.image_url || entries.image || entries.product_image);
+  const videoUrl = normalizeMediaUrl(entries.video_url || entries.video || entries.product_video);
   const media = parseMediaList(entries.media || entries.media_urls || entries.gallery_urls);
   if (imageUrl) media.unshift({ kind: "image", url: imageUrl });
   if (videoUrl) media.push({ kind: "video", url: videoUrl });
@@ -271,6 +284,7 @@ export default function ClientStorefrontSection({ client, onBanner }: Props) {
   const [saving, setSaving] = useState(false);
   const [catalogImporting, setCatalogImporting] = useState(false);
   const [mediaUploading, setMediaUploading] = useState(false);
+  const [mediaUploadNote, setMediaUploadNote] = useState<{ type: "success" | "error" | "info"; text: string } | null>(null);
   const [enabled, setEnabled] = useState(false);
   const [approvedBuyerEmails, setApprovedBuyerEmails] = useState<string[]>([]);
   const [approvedBuyerDraft, setApprovedBuyerDraft] = useState("");
@@ -564,9 +578,12 @@ export default function ClientStorefrontSection({ client, onBanner }: Props) {
 
   function openMediaPicker() {
     if (!selectedCatalogItem) {
-      onBanner("Add or import a product first, then select it before uploading image or video files.", "info");
+      const message = "Add or import a product first, then select it before uploading image or video files.";
+      setMediaUploadNote({ type: "info", text: message });
+      onBanner(message, "info");
       return;
     }
+    setMediaUploadNote({ type: "info", text: `Select one or more files for ${selectedCatalogItem.name}.` });
     mediaInputRef.current?.click();
   }
 
@@ -576,6 +593,7 @@ export default function ClientStorefrontSection({ client, onBanner }: Props) {
     if (!files.length || !selectedCatalogItem) return;
     try {
       setMediaUploading(true);
+      setMediaUploadNote({ type: "info", text: `Uploading ${files.length} file(s) for ${selectedCatalogItem.name}...` });
       const uploaded: CatalogMediaItem[] = [];
       for (const file of files) {
         const isImage = isImageFile(file);
@@ -616,14 +634,19 @@ export default function ClientStorefrontSection({ client, onBanner }: Props) {
       });
       updateCatalogItems(nextItems);
       const firstUploadedUrl = uploaded[0]?.url;
-      onBanner(
+      const successMessage =
         firstUploadedUrl
           ? `${uploaded.length} media file(s) added to ${selectedCatalogItem.name}. Primary URL: ${firstUploadedUrl}`
-          : `${uploaded.length} media file(s) added to ${selectedCatalogItem.name}.`,
+          : `${uploaded.length} media file(s) added to ${selectedCatalogItem.name}.`;
+      setMediaUploadNote({ type: "success", text: successMessage });
+      onBanner(
+        successMessage,
         "success",
       );
     } catch (err: any) {
-      onBanner(err?.message || "Failed to add product media.", "error");
+      const errorMessage = err?.message || "Failed to add product media.";
+      setMediaUploadNote({ type: "error", text: errorMessage });
+      onBanner(errorMessage, "error");
     } finally {
       setMediaUploading(false);
     }
@@ -1064,6 +1087,33 @@ export default function ClientStorefrontSection({ client, onBanner }: Props) {
                 <div style={helper}>3. If assets already live outside Ordanex, use a direct public `https://...` media URL instead.</div>
                 <div style={helper}>4. Download the template, keep row 1 unchanged, and paste product data from row 2 onward.</div>
               </div>
+              {mediaUploadNote ? (
+                <div
+                  style={{
+                    ...mediaStatusBox,
+                    borderColor:
+                      mediaUploadNote.type === "error"
+                        ? "#fecaca"
+                        : mediaUploadNote.type === "success"
+                          ? "#bbf7d0"
+                          : "#c7d2fe",
+                    background:
+                      mediaUploadNote.type === "error"
+                        ? "#fff1f2"
+                        : mediaUploadNote.type === "success"
+                          ? "#f0fdf4"
+                          : "#eff6ff",
+                    color:
+                      mediaUploadNote.type === "error"
+                        ? "#b91c1c"
+                        : mediaUploadNote.type === "success"
+                          ? "#166534"
+                          : "#1d4ed8",
+                  }}
+                >
+                  {mediaUploadNote.text}
+                </div>
+              ) : null}
             </div>
 
             <div style={mediaManagerPanel}>
@@ -1731,6 +1781,16 @@ const mediaGuidanceBox: CSSProperties = {
   borderRadius: 12,
   background: "#fff",
   border: "1px solid #dbe4ee",
+};
+
+const mediaStatusBox: CSSProperties = {
+  padding: 12,
+  borderRadius: 12,
+  border: "1px solid #c7d2fe",
+  fontSize: 12,
+  fontWeight: 700,
+  lineHeight: 1.5,
+  overflowWrap: "anywhere",
 };
 
 const guidanceTitle: CSSProperties = {

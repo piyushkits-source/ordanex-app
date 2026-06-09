@@ -309,9 +309,9 @@ STOREFRONT_TEMPLATE_SAMPLE_ROW = {
     "min_order_qty": 10,
     "moq_uom": "EA",
     "payment_terms": "Net 30",
-    "image_url": "/files/<file_id>/download",
-    "video_url": "https://media.yourdomain.com/catalog/sku-1001-demo.mp4",
-    "media_urls": "/files/<file_id>/download, https://media.yourdomain.com/catalog/sku-1001-alt.jpg",
+    "image_url": "",
+    "video_url": "",
+    "media_urls": "",
     "specifications": "Color: Blue; Size: Medium; Material: Polymer",
 }
 
