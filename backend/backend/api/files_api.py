@@ -6,6 +6,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from PIL import Image
 import pytesseract
@@ -148,12 +149,31 @@ async def upload_portal_file(
 
     _validate_portal_upload(scope, file, file_bytes)
     subdir = _build_portal_subdir(scope, order_id=order_id, product_sku=product_sku)
-    saved = save_uploaded_file(
-        client_id=client_id,
-        original_file_name=file.filename or "upload.bin",
-        file_bytes=file_bytes,
-        subdir=subdir,
+    client_exists = (
+        db.query(models.Client.client_id)
+        .filter(models.Client.client_id == client_id)
+        .first()
     )
+    if not client_exists:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Client '{client_id}' was not found. Save the client first, then upload product media.",
+        )
+
+    try:
+        saved = save_uploaded_file(
+            client_id=client_id,
+            original_file_name=file.filename or "upload.bin",
+            file_bytes=file_bytes,
+            subdir=subdir,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"File storage upload failed: {exc}",
+        ) from exc
 
     file_row = models.FileStore(
         client_id=client_id,
@@ -166,7 +186,20 @@ async def upload_portal_file(
         checksum=saved["checksum"],
     )
     db.add(file_row)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=400,
+            detail="The upload could not be linked to the selected client. Please refresh the client record and try again.",
+        ) from exc
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail=f"File metadata save failed: {exc}",
+        ) from exc
     db.refresh(file_row)
 
     return PortalUploadResponse(

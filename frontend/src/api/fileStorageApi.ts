@@ -32,6 +32,14 @@ async function readFileAsDataUrl(file: File) {
   });
 }
 
+function canUseInlineFallback() {
+  if (typeof window === "undefined") return false;
+  const { hostname, protocol } = window.location;
+  if (hostname === "localhost" || hostname === "127.0.0.1") return true;
+  if (protocol === "file:") return true;
+  return false;
+}
+
 function buildUploadFormData(request: PortalFileUploadRequest) {
   const form = new FormData();
   form.append("file", request.file);
@@ -106,7 +114,12 @@ export async function uploadPortalFile(
     if (!(error instanceof TypeError)) {
       throw error;
     }
-    // Safe fallback below keeps the UI usable when the upload service is temporarily unreachable.
+    if (!canUseInlineFallback()) {
+      throw new Error(
+        "Product media upload could not reach the Ordanex file service. The file was not saved. Please verify the production file-upload API and try again.",
+      );
+    }
+    // Local fallback keeps non-production demos usable when the upload service is temporarily unreachable.
   }
 
   return {
