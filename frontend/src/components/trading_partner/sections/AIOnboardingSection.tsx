@@ -414,6 +414,11 @@ export default function AIOnboardingSection({
       <div style={invoiceHint}>
         Orders, order changes, order responses, ASN, and AP / AR invoices are supported across PDF, IDOC, XML, API, X12, EDIFACT, and AI-assisted onboarding flows.
       </div>
+      {isPremiumSubscription ? (
+        <div style={premiumExperienceBanner}>
+          Premium plug-and-play mode reduces the technical onboarding burden. Start a baseline partner workspace without waiting for full sample packs, then let the backend engine fill in guided defaults, discovery, and setup acceleration.
+        </div>
+      ) : null}
       <div style={launchPadCard}>
         <div style={detailTitle}>Prebuilt Launch Profiles</div>
         <div style={subTitle}>
@@ -476,7 +481,7 @@ export default function AIOnboardingSection({
             </div>
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
               <button type="button" style={primaryButton} onClick={() => void startPremiumQuickLaunch()}>
-                Start Quick Launch
+                Start Plug-and-Play Launch
               </button>
               <button type="button" style={secondaryButton} onClick={() => setWizardStep("Target Output")}>
                 Review Target Output
@@ -637,7 +642,7 @@ export default function AIOnboardingSection({
         <button type="button" style={primaryButton} onClick={() => void createProject()}>Create Onboarding Project</button>
         {isPremiumSubscription ? (
           <button type="button" style={secondaryButton} onClick={() => void startPremiumQuickLaunch()}>
-            Premium Quick Launch
+            Premium Plug-and-Play
           </button>
         ) : null}
         <button type="button" style={secondaryButton} onClick={runDiscovery}>Run Discovery</button>
@@ -1059,6 +1064,7 @@ const tdEmpty: React.CSSProperties = { padding: "16px 12px", fontSize: 13, color
 const emptyState: React.CSSProperties = { color: "#64748b", fontSize: 13, lineHeight: 1.6 };
 const summaryCard: React.CSSProperties = { border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "#f8fafc", display: "grid", gap: 8, marginBottom: 12 };
 const invoiceHint: React.CSSProperties = { marginTop: 10, padding: "10px 12px", borderRadius: 12, background: "#eff6ff", border: "1px solid #bfdbfe", color: "#1e3a8a", fontSize: 12, fontWeight: 600 };
+const premiumExperienceBanner: React.CSSProperties = { marginTop: 10, padding: "12px 14px", borderRadius: 12, background: "linear-gradient(180deg, #eef2ff 0%, #ffffff 100%)", border: "1px solid #c7d2fe", color: "#3730a3", fontSize: 12, fontWeight: 700, lineHeight: 1.6 };
 const premiumQuickStartCard: React.CSSProperties = { marginTop: 14, padding: 14, borderRadius: 14, border: "1px solid #c7d2fe", background: "linear-gradient(180deg, #eef2ff 0%, #f8fbff 100%)" };
 const launchPadCard: React.CSSProperties = { marginTop: 14, padding: 14, borderRadius: 14, border: "1px solid #dbe4ee", background: "linear-gradient(180deg, #f8fbff 0%, #ffffff 100%)" };
 const launchPadGrid: React.CSSProperties = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))", gap: 12, marginTop: 12 };

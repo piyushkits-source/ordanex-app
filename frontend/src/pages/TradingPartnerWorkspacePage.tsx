@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
+import { FaExchangeAlt, FaSearch } from "react-icons/fa";
 
 import PageHeader from "components/common/PageHeader";
 import { apiFetch, parseApiError } from "utils/api";
@@ -73,7 +74,7 @@ function getActiveSection(pathname: string): SectionKey {
 }
 
 export default function TradingPartnerWorkspacePage() {
-  const { scope, setEnvironmentScope } = useAppScope();
+  const { scope, setClientScope, setEnvironmentScope, setVerticalScope } = useAppScope();
   const isProductionSelected = String(scope.environment || "PROD").toUpperCase() === "PROD";
   const navigate = useNavigate();
   const location = useLocation();
@@ -82,6 +83,17 @@ export default function TradingPartnerWorkspacePage() {
   const [partners, setPartners] = useState<TradingPartner[]>([]);
   const [loading, setLoading] = useState(false);
   const [banner, setBanner] = useState("");
+  const [partnerSearch, setPartnerSearch] = useState("");
+  const [transferOpen, setTransferOpen] = useState(false);
+  const [transferSaving, setTransferSaving] = useState(false);
+  const [clients, setClients] = useState<Array<{ client_id: string; client_name: string }>>([]);
+  const [targetVerticals, setTargetVerticals] = useState<Array<{ vertical_id: string; vertical_name: string; vertical_code: string }>>([]);
+  const [transferForm, setTransferForm] = useState({
+    targetClientId: "",
+    targetVerticalId: "",
+    targetPartnerCode: "",
+    targetPartnerName: "",
+  });
 
   const activeSection = getActiveSection(location.pathname);
 
@@ -89,6 +101,16 @@ export default function TradingPartnerWorkspacePage() {
     () => partners.find((p) => String(p.partner_id) === String(partnerId)) || null,
     [partners, partnerId]
   );
+
+  const filteredPartners = useMemo(() => {
+    const query = partnerSearch.trim().toLowerCase();
+    if (!query) return partners;
+    return partners.filter((partner) =>
+      [partner.partner_name, partner.partner_code, partner.partner_type, partner.status]
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase().includes(query))
+    );
+  }, [partnerSearch, partners]);
 
   useEffect(() => {
     if (scope.clientId && scope.verticalId) {
@@ -139,6 +161,94 @@ export default function TradingPartnerWorkspacePage() {
 
   function openPartner(targetPartnerId: string, section: SectionKey = DEFAULT_SECTION) {
     navigate(`/trading-partners/${targetPartnerId}/${section}`);
+  }
+
+  async function loadClientOptions() {
+    try {
+      const res = await apiFetch(`/client-config/clients`, { method: "GET" });
+      if (!res.ok) throw new Error(await parseApiError(res));
+      const data = await res.json();
+      setClients(Array.isArray(data) ? data : []);
+    } catch (err: any) {
+      setBanner(err?.message || "Failed to load client options.");
+    }
+  }
+
+  async function loadVerticalOptions(clientId: string) {
+    if (!clientId) {
+      setTargetVerticals([]);
+      return;
+    }
+    try {
+      const res = await apiFetch(`/client-config/verticals/${encodeURIComponent(clientId)}`, { method: "GET" });
+      if (!res.ok) throw new Error(await parseApiError(res));
+      const data = await res.json();
+      setTargetVerticals(Array.isArray(data) ? data : []);
+    } catch (err: any) {
+      setBanner(err?.message || "Failed to load target business verticals.");
+    }
+  }
+
+  async function openTransferDialog() {
+    if (!selectedPartner) return;
+    if (!clients.length) {
+      await loadClientOptions();
+    }
+    const initialClientId = scope.clientId || selectedPartner.client_id;
+    const initialVerticalId = scope.verticalId || selectedPartner.vertical_id || "";
+    setTransferForm({
+      targetClientId: initialClientId,
+      targetVerticalId: initialVerticalId ? String(initialVerticalId) : "",
+      targetPartnerCode: selectedPartner.partner_code,
+      targetPartnerName: selectedPartner.partner_name,
+    });
+    await loadVerticalOptions(initialClientId);
+    setTransferOpen(true);
+  }
+
+  async function submitTransfer() {
+    if (!selectedPartner) return;
+    if (!transferForm.targetClientId) {
+      setBanner("Please choose a target client for the transfer.");
+      return;
+    }
+    try {
+      setTransferSaving(true);
+      const res = await apiFetch(`/trading-partners/${selectedPartner.partner_id}/transfer`, {
+        method: "POST",
+        body: JSON.stringify({
+          target_client_id: transferForm.targetClientId,
+          target_vertical_id: transferForm.targetVerticalId || null,
+          target_partner_code: transferForm.targetPartnerCode.trim() || null,
+          target_partner_name: transferForm.targetPartnerName.trim() || null,
+        }),
+      });
+      if (!res.ok) throw new Error(await parseApiError(res));
+      const data = await res.json();
+      const created = data?.partner;
+      const targetClient = clients.find((row) => row.client_id === transferForm.targetClientId);
+      const targetVertical = targetVerticals.find((row) => row.vertical_id === transferForm.targetVerticalId);
+      setBanner("Trading partner setup transferred successfully.");
+      setTransferOpen(false);
+
+      if (created?.partner_id) {
+        setClientScope({
+          clientId: transferForm.targetClientId,
+          clientName: targetClient?.client_name || transferForm.targetClientId,
+        });
+        setVerticalScope({
+          verticalId: transferForm.targetVerticalId || "",
+          verticalName: targetVertical?.vertical_name || "",
+        });
+        navigate(`/trading-partners/${created.partner_id}/${DEFAULT_SECTION}`);
+      } else {
+        await loadPartners();
+      }
+    } catch (err: any) {
+      setBanner(err?.message || "Unable to transfer trading partner setup.");
+    } finally {
+      setTransferSaving(false);
+    }
   }
 
   function renderSection() {
@@ -238,6 +348,12 @@ export default function TradingPartnerWorkspacePage() {
             Partner: {selectedPartner.partner_name} ({selectedPartner.partner_code})
           </div>
         ) : null}
+        {selectedPartner && !isProductionSelected ? (
+          <button type="button" onClick={() => void openTransferDialog()} style={transferButton}>
+            <FaExchangeAlt size={12} />
+            Transfer Setup
+          </button>
+        ) : null}
         <select
           value={scope.environment || "PROD"}
           onChange={(e) => setEnvironmentScope(e.target.value)}
@@ -257,14 +373,25 @@ export default function TradingPartnerWorkspacePage() {
       <div style={layout}>
         <div style={leftPanel}>
           <div style={panelTitle}>Trading Partners</div>
+          <label style={searchWrap}>
+            <FaSearch size={12} color="#94a3b8" />
+            <input
+              value={partnerSearch}
+              onChange={(e) => setPartnerSearch(e.target.value)}
+              placeholder="Search partner by name, code, type, or status"
+              style={searchInput}
+            />
+          </label>
 
           {loading ? (
             <div style={emptyText}>Loading...</div>
           ) : partners.length === 0 ? (
             <div style={emptyText}>No trading partners found.</div>
+          ) : filteredPartners.length === 0 ? (
+            <div style={emptyText}>No trading partners match the current search.</div>
           ) : (
             <div style={{ display: "grid", gap: 8 }}>
-              {partners.map((p) => {
+              {filteredPartners.map((p) => {
                 const active = String(p.partner_id) === String(partnerId);
                 return (
                   <button
@@ -301,7 +428,89 @@ export default function TradingPartnerWorkspacePage() {
           <div style={contentArea}>{renderSection()}</div>
         </div>
       </div>
+
+      {transferOpen ? (
+        <div style={modalBackdrop}>
+          <div style={modalCard}>
+            <div style={modalHeader}>
+              <div>
+                <div style={panelTitle}>Transfer Trading Partner Setup</div>
+                <div style={modalHint}>
+                  Clone this trading partner and all major setup into another client or business vertical for M&amp;A and divestiture scenarios.
+                </div>
+              </div>
+              <button type="button" onClick={() => setTransferOpen(false)} style={closeButton}>
+                Close
+              </button>
+            </div>
+
+            <div style={modalGrid}>
+              {field("Target Client", (
+                <select
+                  value={transferForm.targetClientId}
+                  onChange={async (e) => {
+                    const nextClientId = e.target.value;
+                    setTransferForm((prev) => ({ ...prev, targetClientId: nextClientId, targetVerticalId: "" }));
+                    await loadVerticalOptions(nextClientId);
+                  }}
+                  style={modalInput}
+                >
+                  <option value="">Select client</option>
+                  {clients.map((client) => (
+                    <option key={client.client_id} value={client.client_id}>
+                      {client.client_name} ({client.client_id})
+                    </option>
+                  ))}
+                </select>
+              ))}
+              {field("Target Vertical (Optional)", (
+                <select
+                  value={transferForm.targetVerticalId}
+                  onChange={(e) => setTransferForm((prev) => ({ ...prev, targetVerticalId: e.target.value }))}
+                  style={modalInput}
+                >
+                  <option value="">No vertical override</option>
+                  {targetVerticals.map((vertical) => (
+                    <option key={vertical.vertical_id} value={vertical.vertical_id}>
+                      {vertical.vertical_name} ({vertical.vertical_code})
+                    </option>
+                  ))}
+                </select>
+              ))}
+              {field("Transferred Partner Code", (
+                <input
+                  value={transferForm.targetPartnerCode}
+                  onChange={(e) => setTransferForm((prev) => ({ ...prev, targetPartnerCode: e.target.value }))}
+                  style={modalInput}
+                />
+              ))}
+              {field("Transferred Partner Name", (
+                <input
+                  value={transferForm.targetPartnerName}
+                  onChange={(e) => setTransferForm((prev) => ({ ...prev, targetPartnerName: e.target.value }))}
+                  style={modalInput}
+                />
+              ))}
+            </div>
+
+            <div style={modalActionRow}>
+              <button type="button" style={primaryActionButton} onClick={() => void submitTransfer()} disabled={transferSaving}>
+                {transferSaving ? "Transferring..." : "Transfer Setup"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
+  );
+}
+
+function field(label: string, control: React.ReactNode) {
+  return (
+    <label style={{ display: "grid", gap: 8 }}>
+      <span style={{ fontSize: 12, fontWeight: 700, color: "#334155" }}>{label}</span>
+      {control}
+    </label>
   );
 }
 
@@ -413,3 +622,15 @@ const contextChipMuted: React.CSSProperties = {
   fontWeight: 700,
 };
 const envSelect: React.CSSProperties = { minHeight: 34, borderRadius: 999, border: "1px solid #dbe4ee", background: "#fff", color: "#0f172a", padding: "6px 12px", fontSize: 12, fontWeight: 700 };
+const transferButton: React.CSSProperties = { display: "inline-flex", alignItems: "center", gap: 6, minHeight: 34, borderRadius: 999, border: "1px solid #c7d2fe", background: "#eef2ff", color: "#4338ca", padding: "6px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer" };
+const searchWrap: React.CSSProperties = { display: "flex", alignItems: "center", gap: 8, minHeight: 40, padding: "0 12px", border: "1px solid #dbe4ee", borderRadius: 12, background: "#fff", marginBottom: 12 };
+const searchInput: React.CSSProperties = { flex: 1, minWidth: 0, border: 0, outline: "none", fontSize: 13, color: "#0f172a", background: "transparent" };
+const modalBackdrop: React.CSSProperties = { position: "fixed", inset: 0, background: "rgba(15,23,42,0.38)", display: "grid", placeItems: "center", zIndex: 50, padding: 20 };
+const modalCard: React.CSSProperties = { width: "min(720px, 100%)", borderRadius: 18, background: "#fff", border: "1px solid #dbe4ee", boxShadow: "0 24px 60px rgba(15,23,42,0.18)", padding: 20 };
+const modalHeader: React.CSSProperties = { display: "flex", justifyContent: "space-between", gap: 16, alignItems: "flex-start", marginBottom: 16 };
+const modalHint: React.CSSProperties = { fontSize: 13, color: "#64748b", lineHeight: 1.6, marginTop: 4 };
+const closeButton: React.CSSProperties = { border: "1px solid #dbe4ee", borderRadius: 999, background: "#fff", color: "#334155", padding: "8px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer" };
+const modalGrid: React.CSSProperties = { display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 14 };
+const modalInput: React.CSSProperties = { width: "100%", minHeight: 42, borderRadius: 12, border: "1px solid #dbe4ee", background: "#fff", color: "#0f172a", padding: "10px 12px", fontSize: 13 };
+const modalActionRow: React.CSSProperties = { display: "flex", justifyContent: "flex-end", marginTop: 18 };
+const primaryActionButton: React.CSSProperties = { border: "1px solid #0b5fff", borderRadius: 12, background: "#0b5fff", color: "#fff", padding: "10px 14px", fontSize: 13, fontWeight: 700, cursor: "pointer" };

@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import PageHeader from "components/common/PageHeader";
+import { FaSearch } from "react-icons/fa";
 import ClientMasterSection from "components/client_config/sections/ClientMasterSection";
 import BusinessVerticalSection from "components/client_config/sections/BusinessVerticalSection";
 import ClientConnectionsSection from "components/client_config/sections/ClientConnectionsSection";
@@ -38,6 +39,7 @@ export default function ClientConfigWorkspacePage() {
   const [loading, setLoading] = useState(false);
   const [banner, setBanner] = useState<{ type: "success" | "error" | "info"; text: string } | null>(null);
   const [createMode, setCreateMode] = useState(false);
+  const [clientSearch, setClientSearch] = useState("");
 
   const { scope, setClientScope, setVerticalScope, setEnvironmentScope } = useAppScope();
   const isProductionSelected = String(scope.environment || "PROD").toUpperCase() === "PROD";
@@ -46,6 +48,16 @@ export default function ClientConfigWorkspacePage() {
     () => clients.find((c) => c.client_id === selectedClientId) || null,
     [clients, selectedClientId]
   );
+
+  const filteredClients = useMemo(() => {
+    const query = clientSearch.trim().toLowerCase();
+    if (!query) return clients;
+    return clients.filter((client) =>
+      [client.client_id, client.client_name, client.subscription_type, client.status]
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase().includes(query))
+    );
+  }, [clientSearch, clients]);
 
   useEffect(() => {
     loadClients();
@@ -200,13 +212,25 @@ export default function ClientConfigWorkspacePage() {
             </button>
           </div>
 
+          <label style={searchWrap}>
+            <FaSearch size={12} color="#94a3b8" />
+            <input
+              value={clientSearch}
+              onChange={(e) => setClientSearch(e.target.value)}
+              placeholder="Search client by name, ID, plan, or status"
+              style={searchInput}
+            />
+          </label>
+
           <div style={{ display: "grid", gap: 8 }}>
             {loading ? (
               <div style={emptyText}>Loading clients...</div>
             ) : clients.length === 0 ? (
               <div style={emptyText}>No clients found. Create your first client.</div>
+            ) : filteredClients.length === 0 ? (
+              <div style={emptyText}>No clients match the current search.</div>
             ) : (
-              clients.map((client) => {
+              filteredClients.map((client) => {
                 const active = !createMode && selectedClientId === client.client_id;
                 return (
                   <button
@@ -342,3 +366,5 @@ const statusChip: React.CSSProperties = { border: "1px solid #bfdbfe", backgroun
 const statusChipMuted: React.CSSProperties = { border: "1px solid #e5e7eb", background: "#fff", color: "#475569", borderRadius: 999, padding: "6px 10px", fontSize: 12, fontWeight: 700 };
 const envSelect: React.CSSProperties = { minHeight: 34, borderRadius: 999, border: "1px solid #dbe4ee", background: "#fff", color: "#0f172a", padding: "6px 12px", fontSize: 12, fontWeight: 700 };
 const productionBanner: React.CSSProperties = { marginBottom: 14, border: "1px solid #fecaca", borderRadius: 10, padding: "10px 12px", fontSize: 13, fontWeight: 600, color: "#b91c1c", background: "#fef2f2" };
+const searchWrap: React.CSSProperties = { display: "flex", alignItems: "center", gap: 8, minHeight: 40, padding: "0 12px", border: "1px solid #dbe4ee", borderRadius: 12, background: "#fff", marginBottom: 12 };
+const searchInput: React.CSSProperties = { flex: 1, minWidth: 0, border: 0, outline: "none", fontSize: 13, color: "#0f172a", background: "transparent" };

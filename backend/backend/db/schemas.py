@@ -200,6 +200,19 @@ class TradingPartnerRead(TradingPartnerCreate):
     model_config = {"from_attributes": True}
 
 
+class TradingPartnerTransferRequest(BaseModel):
+    target_client_id: str
+    target_vertical_id: UUID | None = None
+    target_partner_code: str | None = None
+    target_partner_name: str | None = None
+    copy_notifications: bool = True
+
+
+class TradingPartnerTransferResponse(BaseModel):
+    partner: TradingPartnerRead
+    copied_items: dict[str, int] = Field(default_factory=dict)
+
+
 class TradingPartnerProfileCreate(BaseModel):
     client_id: str
     partner_id: UUID

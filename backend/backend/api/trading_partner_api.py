@@ -19,6 +19,7 @@ from backend.services.email_polling_service import email_polling_service
 
 from backend.db.database import get_db
 from backend.db import models, schemas
+from backend.db import schemas_partner_patch
 from backend.db.models_rules_uom_mapping import (
     TradingPartnerBusinessRule,
     TradingPartnerMappingProfile,
@@ -285,6 +286,26 @@ FIELD_REQUIREMENT_TEMPLATE_COLUMNS = [
     "req_item_ship_to_override",
 ]
 
+
+def _clone_model_row(
+    db: Session,
+    model_cls,
+    source_row,
+    *,
+    overrides: dict | None = None,
+):
+    data = {}
+    primary_keys = {column.name for column in model_cls.__table__.primary_key.columns}
+    for column in model_cls.__table__.columns:
+        if column.name in primary_keys or column.name in PROMOTION_SYSTEM_FIELDS:
+            continue
+        data[column.name] = getattr(source_row, column.name)
+    data.update(overrides or {})
+    cloned = model_cls(**data)
+    db.add(cloned)
+    db.flush()
+    return cloned
+
 TARGET_PROFILE_TEMPLATE_COLUMNS = [
     "target_erp",
     "target_standard",
@@ -531,6 +552,256 @@ def update_trading_partner(partner_id: UUID, payload: schemas.TradingPartnerUpda
     return row
 
 
+@router.post("/{partner_id}/transfer", response_model=schemas.TradingPartnerTransferResponse)
+def transfer_trading_partner_setup(
+    partner_id: UUID,
+    payload: schemas.TradingPartnerTransferRequest,
+    db: Session = Depends(get_db),
+):
+    source_partner = (
+        db.query(models.TradingPartner)
+        .filter(models.TradingPartner.partner_id == partner_id)
+        .first()
+    )
+    if not source_partner:
+        raise HTTPException(status_code=404, detail="Trading partner not found.")
+
+    target_client = (
+        db.query(models.Client)
+        .filter(models.Client.client_id == payload.target_client_id)
+        .first()
+    )
+    if not target_client:
+        raise HTTPException(status_code=404, detail="Target client not found.")
+
+    target_partner_code = str(payload.target_partner_code or source_partner.partner_code or "").strip()
+    target_partner_name = str(payload.target_partner_name or source_partner.partner_name or "").strip()
+    if not target_partner_code:
+        raise HTTPException(status_code=400, detail="Target partner code is required.")
+    if not target_partner_name:
+        raise HTTPException(status_code=400, detail="Target partner name is required.")
+
+    if payload.target_vertical_id is not None:
+        target_vertical = (
+            db.query(models.BusinessVertical)
+            .filter(models.BusinessVertical.vertical_id == payload.target_vertical_id)
+            .first()
+        )
+        if not target_vertical or target_vertical.client_id != payload.target_client_id:
+            raise HTTPException(
+                status_code=400,
+                detail="Target business vertical must belong to the selected target client.",
+            )
+
+    effective_vertical_id = (
+        payload.target_vertical_id
+        if payload.target_vertical_id is not None
+        else source_partner.vertical_id
+        if payload.target_client_id == source_partner.client_id
+        else None
+    )
+
+    existing = (
+        db.query(models.TradingPartner)
+        .filter(
+            models.TradingPartner.client_id == payload.target_client_id,
+            models.TradingPartner.partner_code == target_partner_code,
+        )
+        .first()
+    )
+    if existing:
+        raise HTTPException(
+            status_code=400,
+            detail="A trading partner with this code already exists for the target client.",
+        )
+
+    cloned_partner = _clone_model_row(
+        db,
+        models.TradingPartner,
+        source_partner,
+        overrides={
+            "client_id": payload.target_client_id,
+            "vertical_id": effective_vertical_id,
+            "partner_code": target_partner_code,
+            "partner_name": target_partner_name,
+            "notes": (
+                f"{(source_partner.notes or '').strip()} | Cloned from {source_partner.client_id}/{source_partner.partner_code}"
+            ).strip(" |")
+            or None,
+        },
+    )
+
+    copied_items: dict[str, int] = {}
+    connection_id_map: dict[UUID, UUID] = {}
+    mapping_profile_id_map: dict[UUID, UUID] = {}
+    rule_profile_id_map: dict[UUID, UUID] = {}
+    uom_rule_id_map: dict[UUID, UUID] = {}
+    address_id_map: dict[UUID, UUID] = {}
+    parser_profile_id_map: dict[UUID, UUID] = {}
+
+    profiles = (
+        db.query(models.TradingPartnerProfile)
+        .filter(models.TradingPartnerProfile.partner_id == source_partner.partner_id)
+        .all()
+    )
+    for row in profiles:
+        _clone_model_row(
+            db,
+            models.TradingPartnerProfile,
+            row,
+            overrides={"client_id": payload.target_client_id, "partner_id": cloned_partner.partner_id},
+        )
+    copied_items["profiles"] = len(profiles)
+
+    connections = (
+        db.query(models.TradingPartnerConnection)
+        .filter(models.TradingPartnerConnection.partner_id == source_partner.partner_id)
+        .all()
+    )
+    for row in connections:
+        cloned = _clone_model_row(
+            db,
+            models.TradingPartnerConnection,
+            row,
+            overrides={"client_id": payload.target_client_id, "partner_id": cloned_partner.partner_id},
+        )
+        connection_id_map[row.connection_id] = cloned.connection_id
+    copied_items["connections"] = len(connections)
+
+    mapping_profiles = (
+        db.query(TradingPartnerMappingProfile)
+        .filter(TradingPartnerMappingProfile.partner_id == source_partner.partner_id)
+        .all()
+    )
+    for row in mapping_profiles:
+        cloned = _clone_model_row(
+            db,
+            TradingPartnerMappingProfile,
+            row,
+            overrides={"client_id": payload.target_client_id, "partner_id": cloned_partner.partner_id},
+        )
+        mapping_profile_id_map[row.mapping_profile_id] = cloned.mapping_profile_id
+    copied_items["mapping_profiles"] = len(mapping_profiles)
+
+    business_rules = (
+        db.query(TradingPartnerBusinessRule)
+        .filter(TradingPartnerBusinessRule.partner_id == source_partner.partner_id)
+        .all()
+    )
+    for row in business_rules:
+        cloned = _clone_model_row(
+            db,
+            TradingPartnerBusinessRule,
+            row,
+            overrides={"client_id": payload.target_client_id, "partner_id": cloned_partner.partner_id},
+        )
+        rule_profile_id_map[row.rule_id] = cloned.rule_id
+    copied_items["business_rules"] = len(business_rules)
+
+    uom_rules = (
+        db.query(TradingPartnerUomRule)
+        .filter(TradingPartnerUomRule.partner_id == source_partner.partner_id)
+        .all()
+    )
+    for row in uom_rules:
+        cloned = _clone_model_row(
+            db,
+            TradingPartnerUomRule,
+            row,
+            overrides={"client_id": payload.target_client_id, "partner_id": cloned_partner.partner_id},
+        )
+        uom_rule_id_map[row.uom_rule_id] = cloned.uom_rule_id
+    copied_items["uom_rules"] = len(uom_rules)
+
+    address_rows = (
+        db.query(models.AddressMaster)
+        .filter(models.AddressMaster.partner_id == source_partner.partner_id)
+        .all()
+    )
+    for row in address_rows:
+        cloned = _clone_model_row(
+            db,
+            models.AddressMaster,
+            row,
+            overrides={"client_id": payload.target_client_id, "partner_id": cloned_partner.partner_id},
+        )
+        address_id_map[row.address_id] = cloned.address_id
+    copied_items["address_master"] = len(address_rows)
+
+    parser_profiles = (
+        db.query(models.ParserProfile)
+        .filter(models.ParserProfile.partner_id == source_partner.partner_id)
+        .all()
+    )
+    for row in parser_profiles:
+        cloned = _clone_model_row(
+            db,
+            models.ParserProfile,
+            row,
+            overrides={"client_id": payload.target_client_id, "partner_id": cloned_partner.partner_id},
+        )
+        parser_profile_id_map[row.parser_profile_id] = cloned.parser_profile_id
+    copied_items["parser_profiles"] = len(parser_profiles)
+
+    message_flows = (
+        db.query(models.MessageFlow)
+        .filter(models.MessageFlow.partner_id == source_partner.partner_id)
+        .all()
+    )
+    for row in message_flows:
+        _clone_model_row(
+            db,
+            models.MessageFlow,
+            row,
+            overrides={
+                "client_id": payload.target_client_id,
+                "partner_id": cloned_partner.partner_id,
+                "vertical_id": effective_vertical_id,
+                "target_connection_id": connection_id_map.get(row.target_connection_id) if row.target_connection_id else None,
+                "mapping_profile_id": mapping_profile_id_map.get(row.mapping_profile_id) if row.mapping_profile_id else None,
+                "rule_profile_id": rule_profile_id_map.get(row.rule_profile_id) if getattr(row, "rule_profile_id", None) else None,
+                "uom_profile_id": uom_rule_id_map.get(row.uom_profile_id) if row.uom_profile_id else None,
+                "address_profile_id": address_id_map.get(row.address_profile_id) if row.address_profile_id else None,
+                "parser_profile_id": parser_profile_id_map.get(row.parser_profile_id) if row.parser_profile_id else None,
+                "validation_profile_id": mapping_profile_id_map.get(row.validation_profile_id) if row.validation_profile_id else None,
+            },
+        )
+    copied_items["message_flows"] = len(message_flows)
+
+    notifications_count = 0
+    if payload.copy_notifications:
+        notifications = (
+            db.query(PartnerNotification)
+            .filter(PartnerNotification.partner_id == source_partner.partner_id)
+            .all()
+        )
+        for row in notifications:
+            _clone_model_row(
+                db,
+                PartnerNotification,
+                row,
+                overrides={"partner_id": cloned_partner.partner_id},
+            )
+        notifications_count = len(notifications)
+    copied_items["notifications"] = notifications_count
+
+    audit_row = TradingPartnerOnboardingAudit(
+        client_id=payload.target_client_id,
+        partner_id=cloned_partner.partner_id,
+        entity_type="PARTNER_TRANSFER",
+        entity_id=str(cloned_partner.partner_id),
+        action="CREATE",
+        before_json={"source_partner_id": str(source_partner.partner_id), "source_client_id": source_partner.client_id},
+        after_json={"target_client_id": payload.target_client_id, "target_vertical_id": str(effective_vertical_id) if effective_vertical_id else None},
+        remarks="Partner setup transferred for M&A/divestiture or client ownership change.",
+    )
+    db.add(audit_row)
+
+    db.commit()
+    db.refresh(cloned_partner)
+    return {"partner": cloned_partner, "copied_items": copied_items}
+
+
 @router.get("/{partner_id}/profile", response_model=schemas.TradingPartnerProfileRead)
 def get_partner_profile(partner_id: UUID, db: Session = Depends(get_db)):
     partner = db.query(models.TradingPartner).filter(models.TradingPartner.partner_id == partner_id).first()
@@ -583,6 +854,55 @@ def save_partner_profile(partner_id: UUID, payload: schemas.TradingPartnerProfil
     db.commit()
     db.refresh(row)
     return row
+
+
+def _save_partner_notification_row(db: Session, partner_id: UUID, payload: schemas_partner_patch.PartnerNotificationCreate):
+    partner = db.query(models.TradingPartner).filter(models.TradingPartner.partner_id == partner_id).first()
+    if not partner:
+        raise HTTPException(status_code=404, detail="Trading partner not found.")
+
+    row = PartnerNotification(
+        partner_id=partner.partner_id,
+        email=str(payload.email or "").strip(),
+        notification_type=str(payload.notification_type or "FAILED").strip().upper() or "FAILED",
+        include_attachment=bool(payload.include_attachment),
+        is_active=bool(payload.is_active),
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+@router.get("/{partner_id}/notifications", response_model=list[schemas_partner_patch.PartnerNotificationRead])
+def get_partner_notifications(partner_id: UUID, db: Session = Depends(get_db)):
+    partner = db.query(models.TradingPartner).filter(models.TradingPartner.partner_id == partner_id).first()
+    if not partner:
+        raise HTTPException(status_code=404, detail="Trading partner not found.")
+
+    return (
+        db.query(PartnerNotification)
+        .filter(PartnerNotification.partner_id == partner_id)
+        .order_by(PartnerNotification.created_at.asc())
+        .all()
+    )
+
+
+@router.post("/{partner_id}/notifications", response_model=schemas_partner_patch.PartnerNotificationRead)
+def create_partner_notification(
+    partner_id: UUID,
+    payload: schemas_partner_patch.PartnerNotificationCreate,
+    db: Session = Depends(get_db),
+):
+    return _save_partner_notification_row(db, partner_id, payload)
+
+
+@router.post("/notifications", response_model=schemas_partner_patch.PartnerNotificationRead)
+def create_partner_notification_legacy(
+    payload: schemas_partner_patch.PartnerNotificationCreate,
+    db: Session = Depends(get_db),
+):
+    return _save_partner_notification_row(db, payload.partner_id, payload)
 
 
 @router.get("/{partner_id}/connections", response_model=list[schemas.TradingPartnerConnectionRead])
