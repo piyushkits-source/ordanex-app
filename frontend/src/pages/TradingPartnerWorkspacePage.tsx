@@ -4,6 +4,7 @@ import { FaExchangeAlt, FaSearch } from "react-icons/fa";
 
 import PageHeader from "components/common/PageHeader";
 import { apiFetch, parseApiError } from "utils/api";
+import { getAuth } from "utils/auth";
 import { useAppScope } from "context/AppScopeContext";
 import { TradingPartner } from "types/tradingPartner";
 
@@ -75,6 +76,8 @@ function getActiveSection(pathname: string): SectionKey {
 
 export default function TradingPartnerWorkspacePage() {
   const { scope, setClientScope, setEnvironmentScope, setVerticalScope } = useAppScope();
+  const auth = getAuth();
+  const isSuperAdmin = String(auth?.role || "").toLowerCase() === "super_admin";
   const isProductionSelected = String(scope.environment || "PROD").toUpperCase() === "PROD";
   const navigate = useNavigate();
   const location = useLocation();
@@ -348,7 +351,7 @@ export default function TradingPartnerWorkspacePage() {
             Partner: {selectedPartner.partner_name} ({selectedPartner.partner_code})
           </div>
         ) : null}
-        {selectedPartner && !isProductionSelected ? (
+        {selectedPartner && !isProductionSelected && isSuperAdmin ? (
           <button type="button" onClick={() => void openTransferDialog()} style={transferButton}>
             <FaExchangeAlt size={12} />
             Transfer Setup
