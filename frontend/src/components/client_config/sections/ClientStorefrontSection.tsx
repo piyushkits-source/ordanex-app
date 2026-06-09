@@ -117,6 +117,8 @@ function parseSpecifications(value: unknown) {
 function normalizeMediaUrl(value: unknown): string | null {
   const text = String(value || "").trim();
   if (!text) return null;
+  if (/^[a-zA-Z]:[\\/]/.test(text) || text.startsWith("\\\\")) return null;
+  if (text.toLowerCase().startsWith("file://")) return null;
   if (text.includes("<file_id>") || text.includes("<") || text.includes(">")) return null;
   return text;
 }
