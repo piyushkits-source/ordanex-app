@@ -25,6 +25,16 @@ export interface BuyerPortalCatalogItem {
   min_order_qty?: number | null;
   moq_uom?: string | null;
   payment_terms?: string | null;
+  discount_mode?: string | null;
+  discount_value?: number | null;
+  tax_mode?: string | null;
+  tax_value?: number | null;
+  freight_mode?: string | null;
+  freight_value?: number | null;
+  octroi_mode?: string | null;
+  octroi_value?: number | null;
+  shipping_mode?: string | null;
+  shipping_value?: number | null;
   supplier_name?: string | null;
   specifications?: Record<string, string> | null;
 }
@@ -37,6 +47,16 @@ export interface BuyerPortalOrderItem {
   unit_price: number;
   uom?: string;
   delivery_date?: string | null;
+  discount_mode?: string | null;
+  discount_value?: number | null;
+  tax_mode?: string | null;
+  tax_value?: number | null;
+  freight_mode?: string | null;
+  freight_value?: number | null;
+  octroi_mode?: string | null;
+  octroi_value?: number | null;
+  shipping_mode?: string | null;
+  shipping_value?: number | null;
 }
 
 export interface BuyerPortalCommerceSettings {

@@ -510,6 +510,16 @@ class BuyerPortalCatalogItem(BaseModel):
     min_order_qty: float | None = None
     moq_uom: str | None = None
     payment_terms: str | None = None
+    discount_mode: str | None = None
+    discount_value: float | None = None
+    tax_mode: str | None = None
+    tax_value: float | None = None
+    freight_mode: str | None = None
+    freight_value: float | None = None
+    octroi_mode: str | None = None
+    octroi_value: float | None = None
+    shipping_mode: str | None = None
+    shipping_value: float | None = None
     supplier_name: str | None = None
     specifications: dict[str, str] | None = None
 
@@ -522,6 +532,16 @@ class BuyerPortalOrderItem(BaseModel):
     unit_price: float
     uom: str = "EA"
     delivery_date: date | None = None
+    discount_mode: str | None = None
+    discount_value: float | None = None
+    tax_mode: str | None = None
+    tax_value: float | None = None
+    freight_mode: str | None = None
+    freight_value: float | None = None
+    octroi_mode: str | None = None
+    octroi_value: float | None = None
+    shipping_mode: str | None = None
+    shipping_value: float | None = None
 
 
 class BuyerPortalOrderCreate(BaseModel):

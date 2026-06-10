@@ -31,6 +31,16 @@ type CatalogItem = {
   min_order_qty?: number | null;
   moq_uom?: string | null;
   payment_terms?: string | null;
+  discount_mode?: string | null;
+  discount_value?: number | null;
+  tax_mode?: string | null;
+  tax_value?: number | null;
+  freight_mode?: string | null;
+  freight_value?: number | null;
+  octroi_mode?: string | null;
+  octroi_value?: number | null;
+  shipping_mode?: string | null;
+  shipping_value?: number | null;
   supplier_name?: string | null;
   image_url?: string | null;
   video_url?: string | null;
@@ -86,6 +96,54 @@ function parseNumber(value: unknown) {
   if (value === null || value === undefined || value === "") return null;
   const parsed = Number(String(value).replace(/,/g, "").trim());
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function normalizeChargeMode(value: unknown) {
+  const mode = String(value || "NONE").trim().toUpperCase();
+  return mode === "PERCENT" || mode === "AMOUNT" ? mode : "NONE";
+}
+
+function chargeAmount(baseAmount: number, mode: unknown, rawValue: unknown) {
+  const numericValue = parseNumber(rawValue) ?? 0;
+  if (!numericValue) return 0;
+  const normalizedMode = normalizeChargeMode(mode);
+  if (normalizedMode === "PERCENT") {
+    return (baseAmount * numericValue) / 100;
+  }
+  if (normalizedMode === "AMOUNT") {
+    return numericValue;
+  }
+  return 0;
+}
+
+function catalogChargeSummary(item: CatalogItem) {
+  return [
+    ["Discount", item.discount_mode, item.discount_value],
+    ["Tax", item.tax_mode, item.tax_value],
+    ["Freight", item.freight_mode, item.freight_value],
+    ["Octroi", item.octroi_mode, item.octroi_value],
+    ["Shipping", item.shipping_mode, item.shipping_value],
+  ]
+    .map(([label, mode, value]) => {
+      const normalizedMode = normalizeChargeMode(mode);
+      const numericValue = parseNumber(value);
+      if (normalizedMode === "NONE" || numericValue === null || numericValue === 0) return null;
+      return normalizedMode === "PERCENT"
+        ? `${label}: ${numericValue}%`
+        : `${label}: ${numericValue}`;
+    })
+    .filter(Boolean) as string[];
+}
+
+function estimateCatalogTotal(item: CatalogItem, quantity = 1) {
+  const subtotal = (parseNumber(item.unit_price) ?? 0) * Math.max(1, quantity);
+  const discount = chargeAmount(subtotal, item.discount_mode, item.discount_value);
+  const discountedSubtotal = Math.max(0, subtotal - discount);
+  const tax = chargeAmount(discountedSubtotal, item.tax_mode, item.tax_value);
+  const freight = chargeAmount(discountedSubtotal, item.freight_mode, item.freight_value);
+  const octroi = chargeAmount(discountedSubtotal, item.octroi_mode, item.octroi_value);
+  const shipping = chargeAmount(discountedSubtotal, item.shipping_mode, item.shipping_value);
+  return discountedSubtotal + tax + freight + octroi + shipping;
 }
 
 function parseSpecifications(value: unknown) {
@@ -236,6 +294,16 @@ function mapCatalogRow(row: Record<string, unknown>, supplierName: string): Cata
     min_order_qty: parseNumber(entries.min_order_qty ?? entries.moq ?? entries.minimum_order_qty),
     moq_uom: String(entries.moq_uom || entries.min_order_uom || entries.uom || "").trim() || null,
     payment_terms: String(entries.payment_terms || "").trim() || null,
+    discount_mode: normalizeChargeMode(entries.discount_mode),
+    discount_value: parseNumber(entries.discount_value),
+    tax_mode: normalizeChargeMode(entries.tax_mode),
+    tax_value: parseNumber(entries.tax_value),
+    freight_mode: normalizeChargeMode(entries.freight_mode),
+    freight_value: parseNumber(entries.freight_value),
+    octroi_mode: normalizeChargeMode(entries.octroi_mode),
+    octroi_value: parseNumber(entries.octroi_value),
+    shipping_mode: normalizeChargeMode(entries.shipping_mode),
+    shipping_value: parseNumber(entries.shipping_value),
     supplier_name: supplierName,
     image_url: imageUrl,
     video_url: videoUrl,
@@ -503,6 +571,16 @@ export default function ClientStorefrontSection({ client, onBanner }: Props) {
       min_order_qty: 1,
       moq_uom: "EA",
       payment_terms: form.payment_terms || "",
+      discount_mode: "NONE",
+      discount_value: null,
+      tax_mode: "NONE",
+      tax_value: null,
+      freight_mode: "NONE",
+      freight_value: null,
+      octroi_mode: "NONE",
+      octroi_value: null,
+      shipping_mode: "NONE",
+      shipping_value: null,
       supplier_name: supplierName,
       media: [],
       specifications: null,
@@ -1339,6 +1417,49 @@ export default function ClientStorefrontSection({ client, onBanner }: Props) {
                   }
                 />
               </div>
+              <div style={{ gridColumn: "1 / -1", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>
+                {[
+                  ["discount", "Discount"],
+                  ["tax", "Tax"],
+                  ["freight", "Freight"],
+                  ["octroi", "Octroi"],
+                  ["shipping", "Shipping"],
+                ].map(([prefix, label]) => (
+                  <div key={prefix} style={fieldCard}>
+                    <div style={fieldLabel}>{label}</div>
+                    <div style={{ display: "grid", gap: 10 }}>
+                      <select
+                        style={input}
+                        value={String(selectedCatalogItem[`${prefix}_mode`] || "NONE")}
+                        onChange={(e) =>
+                          upsertSelectedCatalogItem((item) => ({
+                            ...item,
+                            [`${prefix}_mode`]: e.target.value,
+                          }))
+                        }
+                      >
+                        <option value="NONE">None</option>
+                        <option value="PERCENT">Percent</option>
+                        <option value="AMOUNT">Amount</option>
+                      </select>
+                      <input
+                        style={input}
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        placeholder={String(selectedCatalogItem[`${prefix}_mode`] || "NONE") === "PERCENT" ? "Enter %" : "Enter amount"}
+                        value={selectedCatalogItem[`${prefix}_value`] ?? ""}
+                        onChange={(e) =>
+                          upsertSelectedCatalogItem((item) => ({
+                            ...item,
+                            [`${prefix}_value`]: parseNumber(e.target.value),
+                          }))
+                        }
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
               <div style={wideFieldCard}>
                 <div style={fieldLabel}>Short description</div>
                 <textarea
@@ -1463,6 +1584,24 @@ export default function ClientStorefrontSection({ client, onBanner }: Props) {
                         <div style={previewChip}>{item.stock_status || "Available"}</div>
                         {item.lead_time ? <div style={previewChip}>Lead time: {item.lead_time}</div> : null}
                         {item.payment_terms ? <div style={previewChip}>{item.payment_terms}</div> : null}
+                        {catalogChargeSummary(item).map((entry) => (
+                          <div key={entry} style={previewChip}>{entry}</div>
+                        ))}
+                      </div>
+
+                      <div style={{ ...previewMetaGrid, marginTop: 2 }}>
+                        <div style={previewMetaBlock}>
+                          <div style={previewMetaLabel}>Estimated total</div>
+                          <div style={previewMetaValue}>
+                            {(item.currency || "USD").toUpperCase()} {estimateCatalogTotal(item, Number(item.min_order_qty || 1)).toFixed(2)}
+                          </div>
+                        </div>
+                        <div style={previewMetaBlock}>
+                          <div style={previewMetaLabel}>Estimate basis</div>
+                          <div style={previewMetaValue}>
+                            MOQ {item.min_order_qty ? `${item.min_order_qty} ${item.moq_uom || item.uom || ""}`.trim() : `1 ${item.uom || "EA"}`}
+                          </div>
+                        </div>
                       </div>
 
                       <div style={previewMetaGrid}>

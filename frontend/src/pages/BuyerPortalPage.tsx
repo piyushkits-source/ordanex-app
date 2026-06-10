@@ -49,6 +49,56 @@ function money(value: number, currency = "USD") {
   }).format(value || 0);
 }
 
+function normalizeChargeMode(value?: string | null) {
+  const mode = String(value || "NONE").trim().toUpperCase();
+  return mode === "PERCENT" || mode === "AMOUNT" ? mode : "NONE";
+}
+
+function chargeAmount(baseAmount: number, mode?: string | null, rawValue?: number | null) {
+  const numericValue = Number(rawValue || 0);
+  if (!numericValue) return 0;
+  const normalizedMode = normalizeChargeMode(mode);
+  if (normalizedMode === "PERCENT") return (baseAmount * numericValue) / 100;
+  if (normalizedMode === "AMOUNT") return numericValue;
+  return 0;
+}
+
+function computeCatalogPricing(item: BuyerPortalCatalogItem, quantity = 1) {
+  const subtotal = (Number(item.unit_price) || 0) * Math.max(1, Number(quantity || 1));
+  const discount = chargeAmount(subtotal, item.discount_mode, item.discount_value);
+  const discountedSubtotal = Math.max(0, subtotal - discount);
+  const tax = chargeAmount(discountedSubtotal, item.tax_mode, item.tax_value);
+  const freight = chargeAmount(discountedSubtotal, item.freight_mode, item.freight_value);
+  const octroi = chargeAmount(discountedSubtotal, item.octroi_mode, item.octroi_value);
+  const shipping = chargeAmount(discountedSubtotal, item.shipping_mode, item.shipping_value);
+  return {
+    subtotal,
+    discount,
+    tax,
+    freight,
+    octroi,
+    shipping,
+    total: discountedSubtotal + tax + freight + octroi + shipping,
+  };
+}
+
+function summarizeCatalogCharges(item: BuyerPortalCatalogItem) {
+  return [
+    ["Discount", item.discount_mode, item.discount_value],
+    ["Tax", item.tax_mode, item.tax_value],
+    ["Freight", item.freight_mode, item.freight_value],
+    ["Octroi", item.octroi_mode, item.octroi_value],
+    ["Shipping", item.shipping_mode, item.shipping_value],
+  ]
+    .map(([label, mode, value]) => {
+      const normalizedMode = normalizeChargeMode(String(mode || ""));
+      const numericValue = Number(value || 0);
+      if (normalizedMode === "NONE" || !numericValue) return null;
+      return normalizedMode === "PERCENT" ? `${label}: ${numericValue}%` : `${label}: ${numericValue}`;
+    })
+    .filter(Boolean) as string[];
+}
+
 function statusColor(status?: string | null) {
   const value = String(status || "").toUpperCase();
   if (value.includes("FAIL") || value.includes("ERROR") || value.includes("REJECT")) {
@@ -262,7 +312,24 @@ export default function BuyerPortalPage({ clientId: propClientId }: Props) {
     });
   }, [catalog, search, category]);
 
-  const cartTotal = useMemo(() => cart.reduce((sum, item) => sum + item.quantity * item.unit_price, 0), [cart]);
+  const cartPricing = useMemo(
+    () =>
+      cart.reduce(
+        (totals, item) => {
+          const pricing = computeCatalogPricing(item, item.quantity);
+          totals.subtotal += pricing.subtotal;
+          totals.discount += pricing.discount;
+          totals.tax += pricing.tax;
+          totals.freight += pricing.freight;
+          totals.octroi += pricing.octroi;
+          totals.shipping += pricing.shipping;
+          totals.total += pricing.total;
+          return totals;
+        },
+        { subtotal: 0, discount: 0, tax: 0, freight: 0, octroi: 0, shipping: 0, total: 0 },
+      ),
+    [cart],
+  );
 
   const branding = portalSettings?.branding || {};
   const storefrontTitle = branding.storefront_title || "Buyer Portal";
@@ -490,6 +557,16 @@ export default function BuyerPortalPage({ clientId: propClientId }: Props) {
             quantity: line.quantity,
             unit_price: line.unit_price,
             uom: line.uom || "EA",
+            discount_mode: line.discount_mode,
+            discount_value: line.discount_value,
+            tax_mode: line.tax_mode,
+            tax_value: line.tax_value,
+            freight_mode: line.freight_mode,
+            freight_value: line.freight_value,
+            octroi_mode: line.octroi_mode,
+            octroi_value: line.octroi_value,
+            shipping_mode: line.shipping_mode,
+            shipping_value: line.shipping_value,
           }),
         ),
       });
@@ -867,6 +944,11 @@ export default function BuyerPortalPage({ clientId: propClientId }: Props) {
                         {item.lead_time && showCheckoutPromises ? <span style={tag}>Lead time: {item.lead_time}</span> : null}
                         {item.min_order_qty ? <span style={tag}>MOQ {item.min_order_qty} {item.moq_uom || item.uom || ""}</span> : null}
                         {item.payment_terms ? <span style={tag}>{item.payment_terms}</span> : null}
+                        {summarizeCatalogCharges(item).map((entry) => <span key={entry} style={tag}>{entry}</span>)}
+                      </div>
+
+                      <div style={mutedSmall}>
+                        Estimated landed total at MOQ: {money(computeCatalogPricing(item, Number(item.min_order_qty || 1)).total, item.currency)}
                       </div>
 
                       {showProductSpecs && specsEntries(item.specifications).length ? (
@@ -928,32 +1010,79 @@ export default function BuyerPortalPage({ clientId: propClientId }: Props) {
                 <div style={mutedText}>Your cart is empty. Add products from the catalog.</div>
               ) : (
                 <div style={{ display: "grid", gap: 12 }}>
-                  {cart.map((line) => (
-                    <div key={line.sku} style={cartRow}>
-                      <div style={cartTop}>
-                        <div>
-                          <div style={cartTitle}>{line.name}</div>
-                          <div style={mutedSmall}>{line.sku}</div>
+                  {cart.map((line) => {
+                    const linePricing = computeCatalogPricing(line, line.quantity);
+                    return (
+                      <div key={line.sku} style={cartRow}>
+                        <div style={cartTop}>
+                          <div>
+                            <div style={cartTitle}>{line.name}</div>
+                            <div style={mutedSmall}>{line.sku}</div>
+                          </div>
+                          <button type="button" onClick={() => removeFromCart(line.sku)} style={tagButton}>
+                            Remove
+                          </button>
                         </div>
-                        <button type="button" onClick={() => removeFromCart(line.sku)} style={tagButton}>
-                          Remove
-                        </button>
+                        <div style={cartBottom}>
+                          <input
+                            type="number"
+                            min={Number(line.min_order_qty || 1)}
+                            value={line.quantity}
+                            onChange={(e) => setLineQuantity(line.sku, Number(e.target.value || 1))}
+                            style={{ ...field, width: 96 }}
+                          />
+                          <div style={cartAmount}>{money(linePricing.total, line.currency)}</div>
+                        </div>
+                        <div style={{ ...mutedSmall, marginTop: 8 }}>
+                          Base {money(linePricing.subtotal, line.currency)}
+                          {linePricing.discount ? ` | Discount -${money(linePricing.discount, line.currency)}` : ""}
+                          {linePricing.tax ? ` | Tax ${money(linePricing.tax, line.currency)}` : ""}
+                          {linePricing.freight ? ` | Freight ${money(linePricing.freight, line.currency)}` : ""}
+                          {linePricing.octroi ? ` | Octroi ${money(linePricing.octroi, line.currency)}` : ""}
+                          {linePricing.shipping ? ` | Shipping ${money(linePricing.shipping, line.currency)}` : ""}
+                        </div>
                       </div>
-                      <div style={cartBottom}>
-                        <input
-                          type="number"
-                          min={Number(line.min_order_qty || 1)}
-                          value={line.quantity}
-                          onChange={(e) => setLineQuantity(line.sku, Number(e.target.value || 1))}
-                          style={{ ...field, width: 96 }}
-                        />
-                        <div style={cartAmount}>{money(line.quantity * line.unit_price, line.currency)}</div>
-                      </div>
+                    );
+                  })}
+                  <div style={{ display: "grid", gap: 6 }}>
+                    <div style={cartTotalRow}>
+                      <span>Subtotal</span>
+                      <span>{money(cartPricing.subtotal, currency)}</span>
                     </div>
-                  ))}
-                  <div style={cartTotalRow}>
-                    <span>Total</span>
-                    <span>{money(cartTotal, currency)}</span>
+                    {cartPricing.discount ? (
+                      <div style={cartTotalRow}>
+                        <span>Discount</span>
+                        <span>-{money(cartPricing.discount, currency)}</span>
+                      </div>
+                    ) : null}
+                    {cartPricing.tax ? (
+                      <div style={cartTotalRow}>
+                        <span>Tax</span>
+                        <span>{money(cartPricing.tax, currency)}</span>
+                      </div>
+                    ) : null}
+                    {cartPricing.freight ? (
+                      <div style={cartTotalRow}>
+                        <span>Freight</span>
+                        <span>{money(cartPricing.freight, currency)}</span>
+                      </div>
+                    ) : null}
+                    {cartPricing.octroi ? (
+                      <div style={cartTotalRow}>
+                        <span>Octroi</span>
+                        <span>{money(cartPricing.octroi, currency)}</span>
+                      </div>
+                    ) : null}
+                    {cartPricing.shipping ? (
+                      <div style={cartTotalRow}>
+                        <span>Shipping</span>
+                        <span>{money(cartPricing.shipping, currency)}</span>
+                      </div>
+                    ) : null}
+                    <div style={cartTotalRow}>
+                      <span>Estimated total</span>
+                      <span>{money(cartPricing.total, currency)}</span>
+                    </div>
                   </div>
                 </div>
               )}

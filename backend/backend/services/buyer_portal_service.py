@@ -605,7 +605,7 @@ class BuyerPortalService:
         response.headers["Pragma"] = "no-cache"
         response.headers["Expires"] = "0"
         response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["Cross-Origin-Resource-Policy"] = "same-origin"
+        response.headers["Cross-Origin-Resource-Policy"] = "same-site"
         response.headers["Referrer-Policy"] = "same-origin"
         return response
 
