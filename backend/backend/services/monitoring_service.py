@@ -216,19 +216,37 @@ class MonitoringService:
             query = query.filter(models.PurchaseOrder.created_at <= to_date)
 
         rows = query.order_by(models.PurchaseOrder.created_at.desc()).all()
-        results = [self._serialize_po(db, r) for r in rows]
+        results: list[dict[str, Any]] = []
+        for row in rows:
+            try:
+                results.append(self._serialize_po(db, row))
+            except Exception:
+                continue
+
+        if not results and po_id:
+            fallback_row = (
+                db.query(models.PurchaseOrder)
+                .options(joinedload(models.PurchaseOrder.items))
+                .filter(models.PurchaseOrder.po_id == po_id)
+                .first()
+            )
+            if fallback_row is not None:
+                try:
+                    fallback_payload = self._serialize_po(db, fallback_row)
+                    if not client_id or fallback_payload.get("client_id") == client_id:
+                        results = [fallback_payload]
+                except Exception:
+                    results = []
         if direction and direction != "ALL":
             results = [
                 r for r in results
                 if self._normalize_direction(r.get("direction")) == direction
             ]
-        print("status_filter received=", status_filter)
         if status_filter and status_filter != "ALL":
             results = [
                 r for r in results
                 if self._status_group(r.get("status")) == status_filter
             ]
-        print("statuses returned =", [r.get("status") for r in results[:10]])
         return results
 
     def get_activity_logs(self, db: Session, po_id) -> list[dict[str, Any]]:

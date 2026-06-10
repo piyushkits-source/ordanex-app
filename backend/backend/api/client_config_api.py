@@ -964,125 +964,315 @@ def publish_buyer_storefront_settings(
     }
 
 
-DEFAULT_COMMERCIAL_SETTINGS = {
-    "source_mode": "ORDANEX_MASTER",
-    "erp_sync_enabled": False,
-    "erp_sync_frequency": "DAILY",
-    "erp_last_sync_at": None,
-    "currency_mode": "CLIENT_DEFAULT",
-    "fallback_policy": "ZERO_FALLBACK",
-    "checkout_priority": [
-        "Buyer-specific ERP contract",
-        "Ship-to jurisdiction ERP rule",
-        "Product ERP mapping",
-        "Ordanex storefront override",
-        "Ordanex client default",
-        "Zero fallback",
-    ],
-    "charge_codes": [],
-    "jurisdiction_rules": [],
-    "buyer_terms": [],
-    "product_mapping": [],
-}
+DEFAULT_COMMERCIAL_PRIORITIES = [
+    ("ERP_BUYER_CONTRACT", "Buyer-specific ERP contract"),
+    ("ERP_SHIP_TO_RULE", "Ship-to jurisdiction ERP rule"),
+    ("ERP_PRODUCT_MAPPING", "Product ERP mapping"),
+    ("ORDANEX_OVERRIDE", "Ordanex storefront override"),
+    ("CLIENT_DEFAULT", "Ordanex client default"),
+    ("ZERO_FALLBACK", "Zero fallback"),
+]
 
 
-def _commercial_settings_keys(environment: str | None) -> list[str]:
-    env = _normalize_storefront_environment(environment)
-    return [f"COMMERCIAL_SETTINGS_{env}", "COMMERCIAL_SETTINGS"]
+def _commercial_environment(environment: str | None) -> str:
+    return _normalize_storefront_environment(environment)
 
 
-def _commercial_settings_row(db: Session, client_id: str, environment: str | None = None):
-    rows = (
-        db.query(models.ClientConfig)
-        .filter(models.ClientConfig.client_id == client_id)
-        .filter(models.ClientConfig.config_type == "COMMERCIAL")
-        .filter(models.ClientConfig.is_active.is_(True))
-        .order_by(models.ClientConfig.updated_at.desc(), models.ClientConfig.created_at.desc())
-        .all()
+def _commercial_setting_row(db: Session, client_id: str, environment: str | None = None):
+    env = _commercial_environment(environment)
+    return (
+        db.query(models.ClientCommercialSetting)
+        .filter(models.ClientCommercialSetting.client_id == client_id)
+        .filter(models.ClientCommercialSetting.environment == env)
+        .filter(models.ClientCommercialSetting.is_active.is_(True))
+        .order_by(models.ClientCommercialSetting.updated_at.desc(), models.ClientCommercialSetting.created_at.desc())
+        .first()
     )
-    return _pick_config_row(rows, _commercial_settings_keys(environment))
 
 
-def _ensure_commercial_settings_row(db: Session, client_id: str, environment: str | None = None):
-    row = _commercial_settings_row(db, client_id, environment)
-    expected_key = _commercial_settings_keys(environment)[0]
-    if row and str(getattr(row, "config_key", "") or "").strip().upper() == expected_key:
+def _ensure_commercial_setting_row(db: Session, client_id: str, environment: str | None = None):
+    row = _commercial_setting_row(db, client_id, environment)
+    if row:
         return row
-    row = models.ClientConfig(
+    row = models.ClientCommercialSetting(
         client_id=client_id,
-        config_type="COMMERCIAL",
-        config_key=expected_key,
-        config_value_json={},
+        environment=_commercial_environment(environment),
+        source_mode="ORDANEX_MASTER",
+        erp_sync_enabled=False,
+        erp_sync_frequency="DAILY",
+        currency_mode="CLIENT_DEFAULT",
+        fallback_policy="ZERO_FALLBACK",
         is_active=True,
     )
     db.add(row)
+    db.flush()
     return row
 
 
-def _commercial_settings_payload(row: models.ClientConfig | None) -> dict[str, Any]:
-    payload = row.config_value_json if row and isinstance(row.config_value_json, dict) else {}
-    merged = {
-        **DEFAULT_COMMERCIAL_SETTINGS,
-        **payload,
+def _serialize_priority_rows(rows: list[models.ClientCommercialPriority]) -> list[dict[str, Any]]:
+    payload = [
+        {
+            "priority_id": str(row.priority_id),
+            "sequence_no": row.sequence_no,
+            "priority_code": row.priority_code,
+            "priority_label": row.priority_label,
+            "source_system": row.source_system,
+            "is_active": row.is_active,
+        }
+        for row in rows
+    ]
+    if payload:
+        return payload
+    return [
+        {
+            "priority_id": None,
+            "sequence_no": index,
+            "priority_code": code,
+            "priority_label": label,
+            "source_system": "SYSTEM",
+            "is_active": True,
+        }
+        for index, (code, label) in enumerate(DEFAULT_COMMERCIAL_PRIORITIES, start=1)
+    ]
+
+
+def _serialize_charge_code_rows(rows: list[models.ClientChargeCode]) -> list[dict[str, Any]]:
+    return [
+        {
+            "charge_code_id": str(row.charge_code_id),
+            "charge_code": row.charge_code,
+            "charge_type": row.charge_type,
+            "description": row.description,
+            "mode": row.mode,
+            "default_value": float(row.default_value) if row.default_value is not None else None,
+            "currency": row.currency,
+            "source_system": row.source_system,
+            "is_active": row.is_active,
+        }
+        for row in rows
+    ]
+
+
+def _serialize_charge_rule_rows(rows: list[models.ClientChargeRule]) -> list[dict[str, Any]]:
+    return [
+        {
+            "charge_rule_id": str(row.charge_rule_id),
+            "rule_name": row.rule_name,
+            "priority": row.priority,
+            "country": row.country,
+            "state": row.state,
+            "postal_code": row.postal_code,
+            "buyer_group": row.buyer_group,
+            "buyer_email": row.buyer_email,
+            "sku": row.sku,
+            "category": row.category,
+            "ship_to_code": row.ship_to_code,
+            "sold_to_code": row.sold_to_code,
+            "charge_code": row.charge_code,
+            "override_mode": row.override_mode,
+            "override_value": float(row.override_value) if row.override_value is not None else None,
+            "source_system": row.source_system,
+            "is_active": row.is_active,
+        }
+        for row in rows
+    ]
+
+
+def _serialize_buyer_term_rows(rows: list[models.ClientBuyerCommercialTerm]) -> list[dict[str, Any]]:
+    return [
+        {
+            "buyer_term_id": str(row.buyer_term_id),
+            "buyer_email": row.buyer_email,
+            "buyer_name": row.buyer_name,
+            "payment_terms": row.payment_terms,
+            "discount_code": row.discount_code,
+            "credit_rules": row.credit_rules,
+            "tax_exemption_code": row.tax_exemption_code,
+            "source_system": row.source_system,
+            "is_active": row.is_active,
+        }
+        for row in rows
+    ]
+
+
+def _serialize_product_map_rows(rows: list[models.ClientProductCommercialMap]) -> list[dict[str, Any]]:
+    return [
+        {
+            "product_commercial_map_id": str(row.product_commercial_map_id),
+            "sku": row.sku,
+            "default_tax_code": row.default_tax_code,
+            "default_freight_code": row.default_freight_code,
+            "default_shipping_code": row.default_shipping_code,
+            "default_octroi_code": row.default_octroi_code,
+            "default_discount_code": row.default_discount_code,
+            "source_system": row.source_system,
+            "is_active": row.is_active,
+        }
+        for row in rows
+    ]
+
+
+def _load_commercial_settings_payload(db: Session, client_id: str, environment: str | None = None) -> dict[str, Any]:
+    env = _commercial_environment(environment)
+    row = _commercial_setting_row(db, client_id, env)
+    priorities = (
+        db.query(models.ClientCommercialPriority)
+        .filter(models.ClientCommercialPriority.client_id == client_id)
+        .filter(models.ClientCommercialPriority.environment == env)
+        .order_by(models.ClientCommercialPriority.sequence_no.asc(), models.ClientCommercialPriority.created_at.asc())
+        .all()
+    )
+    charge_codes = (
+        db.query(models.ClientChargeCode)
+        .filter(models.ClientChargeCode.client_id == client_id)
+        .filter(models.ClientChargeCode.environment == env)
+        .order_by(models.ClientChargeCode.charge_type.asc(), models.ClientChargeCode.charge_code.asc())
+        .all()
+    )
+    rules = (
+        db.query(models.ClientChargeRule)
+        .filter(models.ClientChargeRule.client_id == client_id)
+        .filter(models.ClientChargeRule.environment == env)
+        .order_by(models.ClientChargeRule.priority.asc(), models.ClientChargeRule.rule_name.asc())
+        .all()
+    )
+    buyer_terms = (
+        db.query(models.ClientBuyerCommercialTerm)
+        .filter(models.ClientBuyerCommercialTerm.client_id == client_id)
+        .filter(models.ClientBuyerCommercialTerm.environment == env)
+        .order_by(models.ClientBuyerCommercialTerm.buyer_email.asc())
+        .all()
+    )
+    product_mapping = (
+        db.query(models.ClientProductCommercialMap)
+        .filter(models.ClientProductCommercialMap.client_id == client_id)
+        .filter(models.ClientProductCommercialMap.environment == env)
+        .order_by(models.ClientProductCommercialMap.sku.asc())
+        .all()
+    )
+    return {
+        "client_id": client_id,
+        "environment": env,
+        "source_mode": str(getattr(row, "source_mode", "ORDANEX_MASTER") or "ORDANEX_MASTER").strip().upper(),
+        "erp_sync_enabled": bool(getattr(row, "erp_sync_enabled", False)),
+        "erp_sync_frequency": str(getattr(row, "erp_sync_frequency", "DAILY") or "DAILY").strip().upper(),
+        "erp_last_sync_at": getattr(row, "erp_last_sync_at", None),
+        "currency_mode": str(getattr(row, "currency_mode", "CLIENT_DEFAULT") or "CLIENT_DEFAULT").strip().upper(),
+        "fallback_policy": str(getattr(row, "fallback_policy", "ZERO_FALLBACK") or "ZERO_FALLBACK").strip().upper(),
+        "checkout_priority": _serialize_priority_rows(priorities),
+        "charge_codes": _serialize_charge_code_rows(charge_codes),
+        "jurisdiction_rules": _serialize_charge_rule_rows(rules),
+        "buyer_terms": _serialize_buyer_term_rows(buyer_terms),
+        "product_mapping": _serialize_product_map_rows(product_mapping),
     }
-    for key in ("checkout_priority", "charge_codes", "jurisdiction_rules", "buyer_terms", "product_mapping"):
-        if not isinstance(merged.get(key), list):
-            merged[key] = list(DEFAULT_COMMERCIAL_SETTINGS[key])
-    merged["source_mode"] = str(merged.get("source_mode") or "ORDANEX_MASTER").strip().upper()
-    if merged["source_mode"] not in {"ERP_MASTER", "ORDANEX_MASTER", "HYBRID"}:
-        merged["source_mode"] = "ORDANEX_MASTER"
-    merged["erp_sync_enabled"] = bool(merged.get("erp_sync_enabled", False))
-    merged["erp_sync_frequency"] = str(merged.get("erp_sync_frequency") or "DAILY").strip().upper()
-    merged["currency_mode"] = str(merged.get("currency_mode") or "CLIENT_DEFAULT").strip().upper()
-    merged["fallback_policy"] = str(merged.get("fallback_policy") or "ZERO_FALLBACK").strip().upper()
-    return merged
 
 
-@router.get("/client-commercial-settings/{client_id}")
+@router.get("/client-commercial-settings/{client_id}", response_model=schemas.ClientCommercialSettingsRead)
 def get_client_commercial_settings(
     client_id: str,
     environment: str | None = Query(None),
     db: Session = Depends(get_db),
 ):
-    row = _commercial_settings_row(db, client_id, environment)
-    return {
-        "client_id": client_id,
-        "environment": _normalize_storefront_environment(environment),
-        "settings": _commercial_settings_payload(row),
-    }
+    return _load_commercial_settings_payload(db, client_id, environment)
 
 
-@router.put("/client-commercial-settings/{client_id}")
+@router.put("/client-commercial-settings/{client_id}", response_model=schemas.ClientCommercialSettingsRead)
 def update_client_commercial_settings(
     client_id: str,
-    payload: dict[str, Any],
+    payload: schemas.ClientCommercialSettingsUpdate,
     environment: str | None = Query(None),
     db: Session = Depends(get_db),
 ):
-    row = _ensure_commercial_settings_row(db, client_id, environment)
-    current = _commercial_settings_payload(row)
-    current.update({
-        "source_mode": payload.get("source_mode", current.get("source_mode")),
-        "erp_sync_enabled": payload.get("erp_sync_enabled", current.get("erp_sync_enabled")),
-        "erp_sync_frequency": payload.get("erp_sync_frequency", current.get("erp_sync_frequency")),
-        "erp_last_sync_at": payload.get("erp_last_sync_at", current.get("erp_last_sync_at")),
-        "currency_mode": payload.get("currency_mode", current.get("currency_mode")),
-        "fallback_policy": payload.get("fallback_policy", current.get("fallback_policy")),
-        "checkout_priority": payload.get("checkout_priority", current.get("checkout_priority")),
-        "charge_codes": payload.get("charge_codes", current.get("charge_codes")),
-        "jurisdiction_rules": payload.get("jurisdiction_rules", current.get("jurisdiction_rules")),
-        "buyer_terms": payload.get("buyer_terms", current.get("buyer_terms")),
-        "product_mapping": payload.get("product_mapping", current.get("product_mapping")),
-    })
-    row.config_value_json = _commercial_settings_payload(type("Obj", (), {"config_value_json": current})())
+    env = _commercial_environment(environment)
+    row = _ensure_commercial_setting_row(db, client_id, env)
+    row.source_mode = str(payload.source_mode or "ORDANEX_MASTER").strip().upper()
+    row.erp_sync_enabled = bool(payload.erp_sync_enabled)
+    row.erp_sync_frequency = str(payload.erp_sync_frequency or "DAILY").strip().upper()
+    row.erp_last_sync_at = payload.erp_last_sync_at
+    row.currency_mode = str(payload.currency_mode or "CLIENT_DEFAULT").strip().upper()
+    row.fallback_policy = str(payload.fallback_policy or "ZERO_FALLBACK").strip().upper()
     row.is_active = True
+    db.add(row)
+
+    db.query(models.ClientCommercialPriority).filter(models.ClientCommercialPriority.client_id == client_id).filter(models.ClientCommercialPriority.environment == env).delete(synchronize_session=False)
+    db.query(models.ClientChargeCode).filter(models.ClientChargeCode.client_id == client_id).filter(models.ClientChargeCode.environment == env).delete(synchronize_session=False)
+    db.query(models.ClientChargeRule).filter(models.ClientChargeRule.client_id == client_id).filter(models.ClientChargeRule.environment == env).delete(synchronize_session=False)
+    db.query(models.ClientBuyerCommercialTerm).filter(models.ClientBuyerCommercialTerm.client_id == client_id).filter(models.ClientBuyerCommercialTerm.environment == env).delete(synchronize_session=False)
+    db.query(models.ClientProductCommercialMap).filter(models.ClientProductCommercialMap.client_id == client_id).filter(models.ClientProductCommercialMap.environment == env).delete(synchronize_session=False)
+
+    for entry in payload.checkout_priority:
+        db.add(models.ClientCommercialPriority(
+            client_id=client_id,
+            environment=env,
+            sequence_no=entry.sequence_no,
+            priority_code=entry.priority_code,
+            priority_label=entry.priority_label,
+            source_system=entry.source_system,
+            is_active=entry.is_active,
+        ))
+    for entry in payload.charge_codes:
+        db.add(models.ClientChargeCode(
+            client_id=client_id,
+            environment=env,
+            charge_code=entry.charge_code,
+            charge_type=entry.charge_type,
+            description=entry.description,
+            mode=entry.mode,
+            default_value=entry.default_value,
+            currency=entry.currency,
+            source_system=entry.source_system,
+            is_active=entry.is_active,
+        ))
+    for entry in payload.jurisdiction_rules:
+        db.add(models.ClientChargeRule(
+            client_id=client_id,
+            environment=env,
+            rule_name=entry.rule_name,
+            priority=entry.priority,
+            country=entry.country,
+            state=entry.state,
+            postal_code=entry.postal_code,
+            buyer_group=entry.buyer_group,
+            buyer_email=entry.buyer_email,
+            sku=entry.sku,
+            category=entry.category,
+            ship_to_code=entry.ship_to_code,
+            sold_to_code=entry.sold_to_code,
+            charge_code=entry.charge_code,
+            override_mode=entry.override_mode,
+            override_value=entry.override_value,
+            source_system=entry.source_system,
+            is_active=entry.is_active,
+        ))
+    for entry in payload.buyer_terms:
+        db.add(models.ClientBuyerCommercialTerm(
+            client_id=client_id,
+            environment=env,
+            buyer_email=str(entry.buyer_email or "").strip().lower(),
+            buyer_name=entry.buyer_name,
+            payment_terms=entry.payment_terms,
+            discount_code=entry.discount_code,
+            credit_rules=entry.credit_rules,
+            tax_exemption_code=entry.tax_exemption_code,
+            source_system=entry.source_system,
+            is_active=entry.is_active,
+        ))
+    for entry in payload.product_mapping:
+        db.add(models.ClientProductCommercialMap(
+            client_id=client_id,
+            environment=env,
+            sku=entry.sku,
+            default_tax_code=entry.default_tax_code,
+            default_freight_code=entry.default_freight_code,
+            default_shipping_code=entry.default_shipping_code,
+            default_octroi_code=entry.default_octroi_code,
+            default_discount_code=entry.default_discount_code,
+            source_system=entry.source_system,
+            is_active=entry.is_active,
+        ))
+
     db.commit()
-    db.refresh(row)
-    return {
-        "client_id": client_id,
-        "environment": _normalize_storefront_environment(environment),
-        "settings": _commercial_settings_payload(row),
-    }
+    return _load_commercial_settings_payload(db, client_id, env)
 
 
 @router.post("/client-commercial-settings/{client_id}/publish")
@@ -1092,25 +1282,38 @@ def publish_client_commercial_settings(
     to_environment: str = Query("PROD"),
     db: Session = Depends(get_db),
 ):
-    source_environment = _normalize_storefront_environment(from_environment)
-    target_environment = _normalize_storefront_environment(to_environment)
+    source_environment = _commercial_environment(from_environment)
+    target_environment = _commercial_environment(to_environment)
     if source_environment == target_environment:
         raise HTTPException(status_code=400, detail="Source and target commercial environments must be different.")
 
-    source_row = _commercial_settings_row(db, client_id, source_environment)
-    if source_row is None or not isinstance(source_row.config_value_json, dict):
+    source_payload = _load_commercial_settings_payload(db, client_id, source_environment)
+    if not source_payload:
         raise HTTPException(status_code=404, detail="No commercial settings found for the source environment.")
 
-    target_row = _ensure_commercial_settings_row(db, client_id, target_environment)
-    target_row.config_value_json = json.loads(json.dumps(source_row.config_value_json))
-    target_row.is_active = True
-    db.commit()
-    db.refresh(target_row)
+    update_client_commercial_settings(
+        client_id,
+        schemas.ClientCommercialSettingsUpdate(
+            source_mode=source_payload["source_mode"],
+            erp_sync_enabled=source_payload["erp_sync_enabled"],
+            erp_sync_frequency=source_payload["erp_sync_frequency"],
+            erp_last_sync_at=source_payload["erp_last_sync_at"],
+            currency_mode=source_payload["currency_mode"],
+            fallback_policy=source_payload["fallback_policy"],
+            checkout_priority=source_payload["checkout_priority"],
+            charge_codes=source_payload["charge_codes"],
+            jurisdiction_rules=source_payload["jurisdiction_rules"],
+            buyer_terms=source_payload["buyer_terms"],
+            product_mapping=source_payload["product_mapping"],
+        ),
+        target_environment,
+        db,
+    )
     return {
         "client_id": client_id,
         "source_environment": source_environment,
         "target_environment": target_environment,
-        "settings": _commercial_settings_payload(target_row),
+        "settings": _load_commercial_settings_payload(db, client_id, target_environment),
     }
 
 

@@ -74,6 +74,98 @@ class ClientProfileDetailsUpdate(BaseModel):
 class ClientProfileDetailsRead(ClientProfileDetailsUpdate):
     client_id: str
 
+
+class ClientCommercialSettingBase(BaseModel):
+    source_mode: str = "ORDANEX_MASTER"
+    erp_sync_enabled: bool = False
+    erp_sync_frequency: str = "DAILY"
+    erp_last_sync_at: datetime | None = None
+    currency_mode: str = "CLIENT_DEFAULT"
+    fallback_policy: str = "ZERO_FALLBACK"
+
+
+class ClientCommercialPriorityEntry(BaseModel):
+    priority_id: Any | None = None
+    sequence_no: int = 1
+    priority_code: str
+    priority_label: str
+    source_system: str | None = None
+    is_active: bool = True
+
+
+class ClientChargeCodeEntry(BaseModel):
+    charge_code_id: Any | None = None
+    charge_code: str
+    charge_type: str
+    description: str | None = None
+    mode: str = "PERCENT"
+    default_value: float | None = None
+    currency: str | None = None
+    source_system: str | None = None
+    is_active: bool = True
+
+
+class ClientChargeRuleEntry(BaseModel):
+    charge_rule_id: Any | None = None
+    rule_name: str
+    priority: int = 100
+    country: str | None = None
+    state: str | None = None
+    postal_code: str | None = None
+    buyer_group: str | None = None
+    buyer_email: str | None = None
+    sku: str | None = None
+    category: str | None = None
+    ship_to_code: str | None = None
+    sold_to_code: str | None = None
+    charge_code: str
+    override_mode: str = "DEFAULT"
+    override_value: float | None = None
+    source_system: str | None = None
+    is_active: bool = True
+
+
+class ClientBuyerCommercialTermEntry(BaseModel):
+    buyer_term_id: Any | None = None
+    buyer_email: str
+    buyer_name: str | None = None
+    payment_terms: str | None = None
+    discount_code: str | None = None
+    credit_rules: str | None = None
+    tax_exemption_code: str | None = None
+    source_system: str | None = None
+    is_active: bool = True
+
+
+class ClientProductCommercialMapEntry(BaseModel):
+    product_commercial_map_id: Any | None = None
+    sku: str
+    default_tax_code: str | None = None
+    default_freight_code: str | None = None
+    default_shipping_code: str | None = None
+    default_octroi_code: str | None = None
+    default_discount_code: str | None = None
+    source_system: str | None = None
+    is_active: bool = True
+
+
+class ClientCommercialSettingsUpdate(ClientCommercialSettingBase):
+    checkout_priority: list[ClientCommercialPriorityEntry] = Field(default_factory=list)
+    charge_codes: list[ClientChargeCodeEntry] = Field(default_factory=list)
+    jurisdiction_rules: list[ClientChargeRuleEntry] = Field(default_factory=list)
+    buyer_terms: list[ClientBuyerCommercialTermEntry] = Field(default_factory=list)
+    product_mapping: list[ClientProductCommercialMapEntry] = Field(default_factory=list)
+
+
+class ClientCommercialSettingsRead(ClientCommercialSettingBase):
+    client_id: str
+    environment: str
+    checkout_priority: list[ClientCommercialPriorityEntry] = Field(default_factory=list)
+    charge_codes: list[ClientChargeCodeEntry] = Field(default_factory=list)
+    jurisdiction_rules: list[ClientChargeRuleEntry] = Field(default_factory=list)
+    buyer_terms: list[ClientBuyerCommercialTermEntry] = Field(default_factory=list)
+    product_mapping: list[ClientProductCommercialMapEntry] = Field(default_factory=list)
+
 class VerticalCreate(BaseModel):
     client_id: str
     vertical_code: str

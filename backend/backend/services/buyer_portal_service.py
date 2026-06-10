@@ -932,6 +932,212 @@ class BuyerPortalService:
                 return {}
         return {}
 
+    def _commercial_settings(self, db: Session, client_id: str, environment: str | None = None) -> dict[str, Any]:
+        env = self._normalize_environment(environment)
+        row = (
+            db.query(models.ClientCommercialSetting)
+            .filter(models.ClientCommercialSetting.client_id == client_id)
+            .filter(models.ClientCommercialSetting.environment == env)
+            .filter(models.ClientCommercialSetting.is_active.is_(True))
+            .order_by(models.ClientCommercialSetting.updated_at.desc(), models.ClientCommercialSetting.created_at.desc())
+            .first()
+        )
+        return {
+            "source_mode": str(getattr(row, "source_mode", "ORDANEX_MASTER") or "ORDANEX_MASTER").strip().upper(),
+            "erp_sync_enabled": bool(getattr(row, "erp_sync_enabled", False)),
+            "erp_sync_frequency": str(getattr(row, "erp_sync_frequency", "DAILY") or "DAILY").strip().upper(),
+            "currency_mode": str(getattr(row, "currency_mode", "CLIENT_DEFAULT") or "CLIENT_DEFAULT").strip().upper(),
+            "fallback_policy": str(getattr(row, "fallback_policy", "ZERO_FALLBACK") or "ZERO_FALLBACK").strip().upper(),
+            "charge_codes": (
+                db.query(models.ClientChargeCode)
+                .filter(models.ClientChargeCode.client_id == client_id)
+                .filter(models.ClientChargeCode.environment == env)
+                .filter(models.ClientChargeCode.is_active.is_(True))
+                .all()
+            ),
+            "charge_rules": (
+                db.query(models.ClientChargeRule)
+                .filter(models.ClientChargeRule.client_id == client_id)
+                .filter(models.ClientChargeRule.environment == env)
+                .filter(models.ClientChargeRule.is_active.is_(True))
+                .order_by(models.ClientChargeRule.priority.asc(), models.ClientChargeRule.created_at.asc())
+                .all()
+            ),
+            "buyer_terms": (
+                db.query(models.ClientBuyerCommercialTerm)
+                .filter(models.ClientBuyerCommercialTerm.client_id == client_id)
+                .filter(models.ClientBuyerCommercialTerm.environment == env)
+                .filter(models.ClientBuyerCommercialTerm.is_active.is_(True))
+                .all()
+            ),
+            "product_mapping": (
+                db.query(models.ClientProductCommercialMap)
+                .filter(models.ClientProductCommercialMap.client_id == client_id)
+                .filter(models.ClientProductCommercialMap.environment == env)
+                .filter(models.ClientProductCommercialMap.is_active.is_(True))
+                .all()
+            ),
+        }
+
+    def _charge_amount(self, base_amount: float, mode: str | None, raw_value: Any) -> float:
+        try:
+            numeric = float(raw_value or 0)
+        except Exception:
+            numeric = 0.0
+        normalized_mode = str(mode or "NONE").strip().upper()
+        if not numeric or normalized_mode == "NONE":
+            return 0.0
+        if normalized_mode == "PERCENT":
+            return (base_amount * numeric) / 100.0
+        return numeric
+
+    def _text_matches(self, expected: Any, actual: Any) -> bool:
+        wanted = str(expected or "").strip().lower()
+        if not wanted:
+            return True
+        return wanted in str(actual or "").strip().lower()
+
+    def _resolve_order_commercial_snapshot(
+        self,
+        db: Session,
+        payload: schemas.BuyerPortalOrderCreate,
+    ) -> dict[str, Any]:
+        settings = self._commercial_settings(db, payload.client_id, payload.environment)
+        source_mode = settings["source_mode"]
+        charge_codes = {
+            str(row.charge_code or "").strip().upper(): row
+            for row in settings["charge_codes"]
+            if str(row.charge_code or "").strip()
+        }
+        product_maps = {
+            str(row.sku or "").strip().upper(): row
+            for row in settings["product_mapping"]
+            if str(row.sku or "").strip()
+        }
+        buyer_terms = {
+            self._normalize_email(row.buyer_email): row
+            for row in settings["buyer_terms"]
+            if self._normalize_email(row.buyer_email)
+        }
+        active_buyer_term = buyer_terms.get(self._normalize_email(payload.buyer_email))
+
+        subtotal = 0.0
+        discount_total = 0.0
+        tax_total = 0.0
+        freight_total = 0.0
+        octroi_total = 0.0
+        shipping_total = 0.0
+        resolved_codes: dict[str, str | None] = {
+            "discount_code": getattr(active_buyer_term, "discount_code", None),
+            "tax_code": None,
+            "freight_code": None,
+            "octroi_code": None,
+            "shipping_code": None,
+        }
+
+        for item in payload.items:
+            item_subtotal = float(item.quantity or 0) * float(item.unit_price or 0)
+            subtotal += item_subtotal
+            product_map = product_maps.get(str(item.sku or "").strip().upper())
+
+            defaults_by_type = {
+                "DISCOUNT": getattr(product_map, "default_discount_code", None),
+                "TAX": getattr(product_map, "default_tax_code", None),
+                "FREIGHT": getattr(product_map, "default_freight_code", None),
+                "OCTROI": getattr(product_map, "default_octroi_code", None),
+                "SHIPPING": getattr(product_map, "default_shipping_code", None),
+            }
+
+            rules_for_item = [
+                rule for rule in settings["charge_rules"]
+                if self._text_matches(rule.buyer_email, payload.buyer_email)
+                and self._text_matches(rule.sku, item.sku)
+                and self._text_matches(rule.category, None)
+                and self._text_matches(rule.ship_to_code, payload.ship_to)
+                and self._text_matches(rule.sold_to_code, payload.sold_to or payload.company_name or payload.buyer_name)
+                and self._text_matches(rule.postal_code, payload.ship_to_address)
+                and self._text_matches(rule.country, payload.ship_to_address)
+                and self._text_matches(rule.state, payload.ship_to_address)
+            ]
+
+            def resolve_component(charge_type: str, item_mode: Any, item_value: Any) -> tuple[str | None, float]:
+                selected_code = defaults_by_type.get(charge_type)
+                selected_mode = None
+                selected_value = None
+
+                for rule in rules_for_item:
+                    code_row = charge_codes.get(str(rule.charge_code or "").strip().upper())
+                    if not code_row or str(code_row.charge_type or "").strip().upper() != charge_type:
+                        continue
+                    selected_code = code_row.charge_code
+                    if str(rule.override_mode or "DEFAULT").strip().upper() == "OVERRIDE":
+                        selected_mode = code_row.mode
+                        selected_value = rule.override_value if rule.override_value is not None else code_row.default_value
+                    else:
+                        selected_mode = code_row.mode
+                        selected_value = code_row.default_value
+                    break
+
+                if not selected_code and defaults_by_type.get(charge_type):
+                    code_row = charge_codes.get(str(defaults_by_type[charge_type] or "").strip().upper())
+                    if code_row:
+                        selected_code = code_row.charge_code
+                        selected_mode = code_row.mode
+                        selected_value = code_row.default_value
+
+                if selected_code:
+                    resolved_codes[f"{charge_type.lower()}_code"] = selected_code
+                    return selected_code, self._charge_amount(item_subtotal, selected_mode, selected_value)
+
+                if source_mode != "ERP_MASTER":
+                    return None, self._charge_amount(item_subtotal, item_mode, item_value)
+
+                return None, 0.0
+
+            discount_code, discount_amount = resolve_component("DISCOUNT", item.discount_mode, item.discount_value)
+            taxable_base = max(0.0, item_subtotal - discount_amount)
+            tax_code, tax_amount = resolve_component("TAX", item.tax_mode, item.tax_value)
+            freight_code, freight_amount = resolve_component("FREIGHT", item.freight_mode, item.freight_value)
+            octroi_code, octroi_amount = resolve_component("OCTROI", item.octroi_mode, item.octroi_value)
+            shipping_code, shipping_amount = resolve_component("SHIPPING", item.shipping_mode, item.shipping_value)
+
+            resolved_codes["discount_code"] = resolved_codes["discount_code"] or discount_code
+            resolved_codes["tax_code"] = resolved_codes["tax_code"] or tax_code
+            resolved_codes["freight_code"] = resolved_codes["freight_code"] or freight_code
+            resolved_codes["octroi_code"] = resolved_codes["octroi_code"] or octroi_code
+            resolved_codes["shipping_code"] = resolved_codes["shipping_code"] or shipping_code
+
+            discount_total += discount_amount
+            tax_total += self._charge_amount(taxable_base, "AMOUNT", tax_amount)
+            freight_total += freight_amount
+            octroi_total += octroi_amount
+            shipping_total += shipping_amount
+
+        taxable_amount = max(0.0, subtotal - discount_total)
+        total_amount = taxable_amount + tax_total + freight_total + octroi_total + shipping_total
+        return {
+            "source_mode_used": source_mode,
+            "buyer_email": self._normalize_email(payload.buyer_email),
+            "sold_to_code": payload.sold_to or payload.company_name or payload.buyer_name,
+            "ship_to_code": payload.ship_to,
+            "discount_code": resolved_codes["discount_code"],
+            "tax_code": resolved_codes["tax_code"],
+            "freight_code": resolved_codes["freight_code"],
+            "octroi_code": resolved_codes["octroi_code"],
+            "shipping_code": resolved_codes["shipping_code"],
+            "subtotal_amount": subtotal,
+            "discount_amount": discount_total,
+            "taxable_amount": taxable_amount,
+            "tax_amount": tax_total,
+            "freight_amount": freight_total,
+            "octroi_amount": octroi_total,
+            "shipping_amount": shipping_total,
+            "total_amount": total_amount,
+            "currency": payload.currency or "USD",
+            "sync_version": settings["erp_sync_frequency"],
+            "payment_terms": getattr(active_buyer_term, "payment_terms", None),
+        }
+
     def _normalize_invoice_payload(self, value: Any) -> dict[str, Any] | None:
         if not isinstance(value, dict):
             return None
@@ -1180,13 +1386,20 @@ class BuyerPortalService:
             payment_mode=payment_mode,
             payment_reference=payload.payment_reference,
         )
+        commercial_snapshot = self._resolve_order_commercial_snapshot(db, payload)
+        if commercial_snapshot.get("payment_terms"):
+            payment_terms = str(commercial_snapshot.get("payment_terms") or payment_terms).strip() or payment_terms
         initial_status = "ORDER_RECEIVED" if seller_mode == "STANDALONE_COMMERCE" else "NEW"
         if seller_mode == "STANDALONE_COMMERCE" and payments_enabled and payment_mode in {"PAYMENT_LINK", "OFFLINE_TRANSFER"}:
             initial_status = "PAYMENT_RECEIVED" if payload.payment_reference else "PAYMENT_PENDING"
 
+        correlation_id = uuid4()
+        po_number = self._generate_po_number(payload.client_id)
+
         po = models.PurchaseOrder(
             client_id=payload.client_id,
-            po_number=self._generate_po_number(payload.client_id),
+            po_number=po_number,
+            docnum=po_number,
             po_date=date.today(),
             supplier_name=supplier_display_name,
             currency=payload.currency or client.default_currency or "USD",
@@ -1222,6 +1435,8 @@ class BuyerPortalService:
                     "payment_link_label": payment_link_label,
                     "proof_of_payment_instructions": proof_of_payment_instructions,
                     "supplier_display_name": supplier_display_name,
+                    "commercial_snapshot": commercial_snapshot,
+                    "commercial_source_mode": commercial_snapshot.get("source_mode_used"),
                 },
                 ensure_ascii=False,
             ),
@@ -1236,9 +1451,43 @@ class BuyerPortalService:
             raw_text=json.dumps(payload.model_dump(mode="json"), ensure_ascii=False, default=str),
             total_items=len(payload.items),
             created_by=payload.buyer_email,
+            correlation_id=correlation_id,
         )
         db.add(po)
         db.flush()
+        inbound_message = models.InboundMessage(
+            client_id=payload.client_id,
+            message_type="PO",
+            source_channel="BUYER_PORTAL",
+            source_format="JSON",
+            source_reference=po_number,
+            sender=payload.buyer_email,
+            receiver=payload.client_id,
+            status="RECEIVED",
+            correlation_id=correlation_id,
+            received_at=datetime.utcnow(),
+        )
+        db.add(inbound_message)
+        db.flush()
+        po.inbound_message_id = inbound_message.inbound_message_id
+
+        processing_job = models.ProcessingJob(
+            client_id=payload.client_id,
+            po_id=po.po_id,
+            correlation_id=correlation_id,
+            step_name="BUYER_PORTAL_ORDER",
+            worker_name="buyer_portal_service",
+            queue_name="buyer_portal",
+            retryable=True,
+            job_type="BUYER_PORTAL_ORDER",
+            status="COMPLETED" if seller_mode == "STANDALONE_COMMERCE" else "NEW",
+            priority=100,
+            requested_by=payload.buyer_email,
+            payload_json=payload.model_dump(mode="json"),
+        )
+        db.add(processing_job)
+        db.flush()
+        po.job_id = processing_job.job_id
         db.add(
             models.PoLog(
                 po_id=po.po_id,
@@ -1272,10 +1521,36 @@ class BuyerPortalService:
                     plant=None,
                     is_corrected=False,
                 )
-            )
+        )
 
         po.po_validation_reason = f"Buyer portal order received with {len(payload.items)} item(s)."
         po.total_items = len(payload.items)
+        db.add(
+            models.OrderCommercialSnapshot(
+                po_id=po.po_id,
+                client_id=payload.client_id,
+                environment=self._normalize_environment(payload.environment),
+                source_mode_used=str(commercial_snapshot.get("source_mode_used") or "ORDANEX_MASTER"),
+                buyer_email=commercial_snapshot.get("buyer_email"),
+                sold_to_code=commercial_snapshot.get("sold_to_code"),
+                ship_to_code=commercial_snapshot.get("ship_to_code"),
+                discount_code=commercial_snapshot.get("discount_code"),
+                tax_code=commercial_snapshot.get("tax_code"),
+                freight_code=commercial_snapshot.get("freight_code"),
+                octroi_code=commercial_snapshot.get("octroi_code"),
+                shipping_code=commercial_snapshot.get("shipping_code"),
+                subtotal_amount=commercial_snapshot.get("subtotal_amount"),
+                discount_amount=commercial_snapshot.get("discount_amount"),
+                taxable_amount=commercial_snapshot.get("taxable_amount"),
+                tax_amount=commercial_snapshot.get("tax_amount"),
+                freight_amount=commercial_snapshot.get("freight_amount"),
+                octroi_amount=commercial_snapshot.get("octroi_amount"),
+                shipping_amount=commercial_snapshot.get("shipping_amount"),
+                total_amount=commercial_snapshot.get("total_amount"),
+                currency=commercial_snapshot.get("currency"),
+                sync_version=commercial_snapshot.get("sync_version"),
+            )
+        )
         db.commit()
         db.refresh(po)
 
@@ -1293,6 +1568,11 @@ class BuyerPortalService:
                 f"Buyer portal order saved for standalone commerce. {payment_status}. "
                 f"Supplier can manage confirmation, payment, and fulfillment directly from Ordanex using {payment_provider_name}."
             )
+            processing_job = db.query(models.ProcessingJob).filter(models.ProcessingJob.job_id == po.job_id).first()
+            if processing_job:
+                processing_job.status = "COMPLETED"
+                processing_job.completed_at = datetime.utcnow()
+                db.add(processing_job)
             db.add(po)
             db.commit()
             db.refresh(po)
@@ -1311,11 +1591,22 @@ class BuyerPortalService:
                     buyer_ctx,
                     skip_invoice_validation=True,
                 )
+                processing_job = db.query(models.ProcessingJob).filter(models.ProcessingJob.job_id == po.job_id).first()
+                if processing_job:
+                    processing_job.status = "COMPLETED"
+                    processing_job.completed_at = datetime.utcnow()
+                    db.add(processing_job)
+                    db.commit()
             except Exception as exc:
                 po = db.query(models.PurchaseOrder).filter(models.PurchaseOrder.po_id == po.po_id).first() or po
                 po.status = "PENDING"
                 po.review_status = "BUYER_PORTAL_PROCESSING_PENDING"
                 po.po_validation_reason = f"Buyer portal order saved. Processing will resume automatically: {exc}"
+                processing_job = db.query(models.ProcessingJob).filter(models.ProcessingJob.job_id == po.job_id).first()
+                if processing_job:
+                    processing_job.status = "FAILED"
+                    processing_job.error_message = str(exc)
+                    db.add(processing_job)
                 db.add(po)
                 db.commit()
                 db.refresh(po)

@@ -188,6 +188,148 @@ class ClientConfig(Base):
     created_at = Column(DateTime, nullable=False, server_default=func.now())
     updated_at = Column(DateTime, nullable=False, server_default=func.now())
 
+
+class ClientCommercialSetting(Base):
+    __tablename__ = "client_commercial_settings"
+
+    commercial_setting_id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    client_id = Column(String(100), ForeignKey("clients.client_id", ondelete="CASCADE"), nullable=False, index=True)
+    environment = Column(String(20), nullable=False, default="STAGING", index=True)
+    source_mode = Column(String(30), nullable=False, default="ORDANEX_MASTER")
+    erp_sync_enabled = Column(Boolean, nullable=False, default=False)
+    erp_sync_frequency = Column(String(30), nullable=False, default="DAILY")
+    erp_last_sync_at = Column(DateTime, nullable=True)
+    currency_mode = Column(String(30), nullable=False, default="CLIENT_DEFAULT")
+    fallback_policy = Column(String(50), nullable=False, default="ZERO_FALLBACK")
+    is_active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime, nullable=False, server_default=func.now())
+    updated_at = Column(DateTime, nullable=False, server_default=func.now(), onupdate=func.now())
+
+
+class ClientCommercialPriority(Base):
+    __tablename__ = "client_commercial_priorities"
+
+    priority_id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    client_id = Column(String(100), ForeignKey("clients.client_id", ondelete="CASCADE"), nullable=False, index=True)
+    environment = Column(String(20), nullable=False, default="STAGING", index=True)
+    sequence_no = Column(Integer, nullable=False, default=1)
+    priority_code = Column(String(100), nullable=False)
+    priority_label = Column(String(255), nullable=False)
+    source_system = Column(String(50), nullable=True)
+    is_active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime, nullable=False, server_default=func.now())
+    updated_at = Column(DateTime, nullable=False, server_default=func.now(), onupdate=func.now())
+
+
+class ClientChargeCode(Base):
+    __tablename__ = "client_charge_codes"
+
+    charge_code_id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    client_id = Column(String(100), ForeignKey("clients.client_id", ondelete="CASCADE"), nullable=False, index=True)
+    environment = Column(String(20), nullable=False, default="STAGING", index=True)
+    charge_code = Column(String(100), nullable=False, index=True)
+    charge_type = Column(String(30), nullable=False)
+    description = Column(String(255), nullable=True)
+    mode = Column(String(20), nullable=False, default="PERCENT")
+    default_value = Column(Numeric(18, 4), nullable=True)
+    currency = Column(String(10), nullable=True)
+    source_system = Column(String(50), nullable=True)
+    is_active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime, nullable=False, server_default=func.now())
+    updated_at = Column(DateTime, nullable=False, server_default=func.now(), onupdate=func.now())
+
+
+class ClientChargeRule(Base):
+    __tablename__ = "client_charge_rules"
+
+    charge_rule_id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    client_id = Column(String(100), ForeignKey("clients.client_id", ondelete="CASCADE"), nullable=False, index=True)
+    environment = Column(String(20), nullable=False, default="STAGING", index=True)
+    rule_name = Column(String(255), nullable=False)
+    priority = Column(Integer, nullable=False, default=100)
+    country = Column(String(100), nullable=True)
+    state = Column(String(100), nullable=True)
+    postal_code = Column(String(100), nullable=True)
+    buyer_group = Column(String(100), nullable=True)
+    buyer_email = Column(String(255), nullable=True)
+    sku = Column(String(100), nullable=True)
+    category = Column(String(100), nullable=True)
+    ship_to_code = Column(String(100), nullable=True)
+    sold_to_code = Column(String(100), nullable=True)
+    charge_code = Column(String(100), nullable=False)
+    override_mode = Column(String(20), nullable=False, default="DEFAULT")
+    override_value = Column(Numeric(18, 4), nullable=True)
+    source_system = Column(String(50), nullable=True)
+    is_active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime, nullable=False, server_default=func.now())
+    updated_at = Column(DateTime, nullable=False, server_default=func.now(), onupdate=func.now())
+
+
+class ClientBuyerCommercialTerm(Base):
+    __tablename__ = "client_buyer_commercial_terms"
+
+    buyer_term_id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    client_id = Column(String(100), ForeignKey("clients.client_id", ondelete="CASCADE"), nullable=False, index=True)
+    environment = Column(String(20), nullable=False, default="STAGING", index=True)
+    buyer_email = Column(String(255), nullable=False, index=True)
+    buyer_name = Column(String(255), nullable=True)
+    payment_terms = Column(String(100), nullable=True)
+    discount_code = Column(String(100), nullable=True)
+    credit_rules = Column(Text, nullable=True)
+    tax_exemption_code = Column(String(100), nullable=True)
+    source_system = Column(String(50), nullable=True)
+    is_active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime, nullable=False, server_default=func.now())
+    updated_at = Column(DateTime, nullable=False, server_default=func.now(), onupdate=func.now())
+
+
+class ClientProductCommercialMap(Base):
+    __tablename__ = "client_product_commercial_map"
+
+    product_commercial_map_id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    client_id = Column(String(100), ForeignKey("clients.client_id", ondelete="CASCADE"), nullable=False, index=True)
+    environment = Column(String(20), nullable=False, default="STAGING", index=True)
+    sku = Column(String(100), nullable=False, index=True)
+    default_tax_code = Column(String(100), nullable=True)
+    default_freight_code = Column(String(100), nullable=True)
+    default_shipping_code = Column(String(100), nullable=True)
+    default_octroi_code = Column(String(100), nullable=True)
+    default_discount_code = Column(String(100), nullable=True)
+    source_system = Column(String(50), nullable=True)
+    is_active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime, nullable=False, server_default=func.now())
+    updated_at = Column(DateTime, nullable=False, server_default=func.now(), onupdate=func.now())
+
+
+class OrderCommercialSnapshot(Base):
+    __tablename__ = "order_commercial_snapshot"
+
+    commercial_snapshot_id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    po_id = Column(UUID(as_uuid=True), ForeignKey("purchase_orders.po_id", ondelete="CASCADE"), nullable=False, index=True)
+    client_id = Column(String(100), ForeignKey("clients.client_id", ondelete="CASCADE"), nullable=False, index=True)
+    environment = Column(String(20), nullable=False, default="PROD", index=True)
+    source_mode_used = Column(String(30), nullable=False, default="ORDANEX_MASTER")
+    buyer_email = Column(String(255), nullable=True)
+    sold_to_code = Column(String(100), nullable=True)
+    ship_to_code = Column(String(100), nullable=True)
+    discount_code = Column(String(100), nullable=True)
+    tax_code = Column(String(100), nullable=True)
+    freight_code = Column(String(100), nullable=True)
+    octroi_code = Column(String(100), nullable=True)
+    shipping_code = Column(String(100), nullable=True)
+    subtotal_amount = Column(Numeric(18, 4), nullable=True)
+    discount_amount = Column(Numeric(18, 4), nullable=True)
+    taxable_amount = Column(Numeric(18, 4), nullable=True)
+    tax_amount = Column(Numeric(18, 4), nullable=True)
+    freight_amount = Column(Numeric(18, 4), nullable=True)
+    octroi_amount = Column(Numeric(18, 4), nullable=True)
+    shipping_amount = Column(Numeric(18, 4), nullable=True)
+    total_amount = Column(Numeric(18, 4), nullable=True)
+    currency = Column(String(10), nullable=True)
+    sync_version = Column(String(100), nullable=True)
+    created_at = Column(DateTime, nullable=False, server_default=func.now())
+    updated_at = Column(DateTime, nullable=False, server_default=func.now(), onupdate=func.now())
+
 class FileStore(Base):
     __tablename__ = "file_store"
     file_id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
@@ -532,6 +674,24 @@ class ClientERPConfig(Base):
     is_active = Column(Boolean, nullable=False, default=True)
     created_at = Column(DateTime, nullable=False, server_default=func.now())
     updated_at = Column(DateTime, nullable=False, server_default=func.now())
+
+class ClientSyncEvent(Base):
+    __tablename__ = "client_sync_events"
+
+    sync_event_id = Column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
+    client_id = Column(String(100), ForeignKey("clients.client_id", ondelete="CASCADE"), nullable=False, index=True)
+    sync_key = Column(String(50), nullable=False, index=True)
+    event_type = Column(String(50), nullable=False, default="HEALTH_CHECK")
+    status = Column(String(30), nullable=False, default="UNKNOWN")
+    message = Column(Text, nullable=True)
+    endpoint_url = Column(String(500), nullable=True)
+    source_system = Column(String(100), nullable=True)
+    target_system = Column(String(100), nullable=True)
+    records_synced = Column(Integer, nullable=False, default=0)
+    duration_ms = Column(BigInteger, nullable=True)
+    last_synced_at = Column(DateTime, nullable=True)
+    details_json = Column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    created_at = Column(DateTime, nullable=False, server_default=func.now())
 
 class TradingPartner(Base):
     __tablename__ = "trading_partners"
