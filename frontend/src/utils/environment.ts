@@ -31,3 +31,21 @@ export function buildStorefrontPath(clientId?: string | null, environment?: stri
   const env = storefrontEnvironmentSlug(environment);
   return env === "staging" ? `/portal/staging/${normalizedClientId}` : `/portal/${normalizedClientId}`;
 }
+
+export function buildMonitoringPath(params: {
+  poId?: string | null;
+  clientId?: string | null;
+  environment?: string | null;
+}) {
+  const search = new URLSearchParams();
+  const poId = String(params.poId || "").trim();
+  const clientId = String(params.clientId || "").trim();
+  const environment = normalizeWorkspaceEnvironment(params.environment);
+
+  if (poId) search.set("po_id", poId);
+  if (clientId) search.set("client_id", clientId);
+  if (environment) search.set("environment", environment);
+
+  const query = search.toString();
+  return query ? `/monitoring?${query}` : "/monitoring";
+}
