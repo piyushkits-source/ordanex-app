@@ -947,6 +947,7 @@ class BuyerPortalService:
             receiver=payload.client_id,
             direction="INBOUND",
             environment="PROD",
+            received_at=datetime.utcnow(),
             status=initial_status,
             source_type="BUYER_PORTAL",
             po_confidence="100",
@@ -956,6 +957,19 @@ class BuyerPortalService:
         )
         db.add(po)
         db.flush()
+        db.add(
+            models.PoLog(
+                po_id=po.po_id,
+                client_id=payload.client_id,
+                level="INFO",
+                stage="BUYER_PORTAL_RECEIVED",
+                message=(
+                    f"Buyer portal order received from {payload.buyer_email} "
+                    f"for client {payload.client_id} with {len(payload.items)} item(s)."
+                ),
+                created_by=payload.buyer_email,
+            )
+        )
 
         running_total = 0.0
         for index, item in enumerate(payload.items, start=1):

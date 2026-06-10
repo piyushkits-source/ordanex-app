@@ -17,6 +17,55 @@ class MonitoringService:
             return direction
         return None
 
+    def _infer_payload_direction(self, row: Any) -> str | None:
+        payload = str(
+            getattr(row, "xml_payload", None)
+            or getattr(row, "raw_text", None)
+            or ""
+        ).upper()
+        if not payload:
+            return None
+        if "<DIRECT>1</DIRECT>" in payload or "DIRECT>1" in payload or "DIRECT=1" in payload:
+            return "OUTBOUND"
+        if "<DIRECT>2</DIRECT>" in payload or "DIRECT>2" in payload or "DIRECT=2" in payload:
+            return "INBOUND"
+        return None
+
+    def _infer_transport_direction(self, row: Any) -> str:
+        explicit = self._normalize_direction(
+            getattr(row, "transport_direction", None)
+            or getattr(row, "channel_direction", None)
+            or getattr(row, "source_direction", None)
+        )
+        if explicit:
+            return explicit
+
+        source_channel = str(
+            getattr(row, "source_channel", None)
+            or getattr(row, "source_type", None)
+            or ""
+        ).strip().upper()
+        if source_channel in {"EMAIL", "API", "SFTP", "AS2", "EDI", "FTP", "UPLOAD"}:
+            return "INBOUND"
+        if source_channel in {"OUTBOUND", "DELIVERY", "DISPATCH"}:
+            return "OUTBOUND"
+
+        transport_markers = (
+            getattr(row, "inbound_message_id", None),
+            getattr(row, "received_at", None),
+        )
+        if any(marker not in [None, ""] for marker in transport_markers):
+            return "INBOUND"
+
+        outbound_markers = (
+            getattr(row, "outbound_message_id", None),
+            getattr(row, "delivered_at", None),
+        )
+        if any(marker not in [None, ""] for marker in outbound_markers):
+            return "OUTBOUND"
+
+        return "INBOUND"
+
     def _looks_like_invoice(self, row: Any) -> bool:
         invoice_fields = (
             "invoice_number",
@@ -49,9 +98,13 @@ class MonitoringService:
         return outbound is not None
 
     def _infer_direction(self, row: Any) -> str:
-        explicit = self._normalize_direction(getattr(row, "direction", None))
+        explicit = self._normalize_direction(getattr(row, "business_direction", None))
         if explicit in {"INBOUND", "OUTBOUND"}:
             return explicit
+
+        payload_direction = self._infer_payload_direction(row)
+        if payload_direction:
+            return payload_direction
 
         outbound_markers = (
             getattr(row, "outbound_message_id", None),
@@ -59,8 +112,6 @@ class MonitoringService:
             getattr(row, "dispatch_status", None),
             getattr(row, "delivery_status", None),
             getattr(row, "delivery_reference", None),
-            getattr(row, "target_adapter_name", None),
-            getattr(row, "target_content_type", None),
             getattr(row, "status", None) if str(getattr(row, "status", "") or "").upper() in {"DELIVERY_QUEUED", "DELIVERED", "DELIVERY_FAILED"} else None,
         )
         if any(marker not in [None, ""] for marker in outbound_markers):
@@ -73,7 +124,7 @@ class MonitoringService:
             or getattr(row, "document_type", None)
             or ""
         ).strip().upper()
-        if message_family in {"AR_INVOICE", "ORDRSP", "DESADV"}:
+        if message_family in {"AR_INVOICE", "INVOICE", "ORDRSP", "DESADV"}:
             return "OUTBOUND"
         if message_family in {"AP_INVOICE", "ORDERS", "PO", "ORDER", "ORDER_CHANGE", "ASN"}:
             return "INBOUND"
@@ -111,6 +162,7 @@ class MonitoringService:
         environment: str,
         direction: str | None = None,
         status_filter: str | None = None,
+        client_id: str | None = None,
         search: str | None = None,
         from_date: str | None = None,
         to_date: str | None = None,
@@ -135,6 +187,9 @@ class MonitoringService:
                     models.PurchaseOrder.environment.is_(None),
                 )
             )
+
+        if client_id:
+            query = query.filter(models.PurchaseOrder.client_id == client_id)
 
         if search:
             s = f"%{search.lower()}%"
@@ -181,13 +236,23 @@ class MonitoringService:
         results: list[dict[str, Any]] = []
 
         for idx, r in enumerate(rows, start=1):
-            ts = getattr(r, "created_at", None)
+            ts = (
+                getattr(r, "log_time", None)
+                or getattr(r, "created_at", None)
+                or getattr(r, "timestamp", None)
+                or getattr(r, "logged_at", None)
+                or getattr(r, "event_time", None)
+                or getattr(r, "updated_at", None)
+            )
             timestamp = ts.isoformat() if ts and hasattr(ts, "isoformat") else ""
 
             results.append(
                 {
                     "id": str(getattr(r, "log_id", None) or idx),
+                    "log_id": str(getattr(r, "log_id", None) or idx),
+                    "po_id": str(po_id),
                     "stage": str(getattr(r, "stage", "") or "ACTIVITY"),
+                    "event_type": str(getattr(r, "event_type", "") or getattr(r, "stage", "") or "ACTIVITY"),
                     "level": str(getattr(r, "level", "") or "INFO"),
                     "message": str(getattr(r, "message", "") or ""),
                     "actor_type": None,
@@ -195,10 +260,62 @@ class MonitoringService:
                     "changed_fields": None,
                     "recipients": None,
                     "timestamp": timestamp,
+                    "created_at": timestamp,
                 }
             )
 
-        return results
+        if results:
+            return results
+
+        po = (
+            db.query(models.PurchaseOrder)
+            .filter(models.PurchaseOrder.po_id == po_id)
+            .first()
+        )
+        if not po:
+            return []
+
+        synthetic: list[dict[str, Any]] = []
+
+        def add_log(log_id: str, stage: str, level: str, message: str, dt) -> None:
+            timestamp = dt.isoformat() if dt and hasattr(dt, "isoformat") else ""
+            synthetic.append(
+                {
+                    "id": log_id,
+                    "log_id": log_id,
+                    "po_id": str(po_id),
+                    "stage": stage,
+                    "event_type": stage,
+                    "level": level,
+                    "message": message,
+                    "actor_type": "SYSTEM",
+                    "actor_email": None,
+                    "changed_fields": None,
+                    "recipients": None,
+                    "timestamp": timestamp,
+                    "created_at": timestamp,
+                }
+            )
+
+        add_log("received", "RECEIVED", "INFO", "Inbound document received by platform.", getattr(po, "received_at", None) or getattr(po, "created_at", None))
+        add_log("created", "JOB_CREATED", "INFO", "Processing job created for document.", getattr(po, "created_at", None))
+
+        if getattr(po, "raw_text", None):
+            add_log("parsed", "PARSED", "INFO", "Source document text extracted successfully.", getattr(po, "updated_at", None) or getattr(po, "created_at", None))
+
+        if getattr(po, "ship_to", None) or getattr(po, "ship_to_name", None):
+            add_log("resolved_ship_to", "ADDRESS_RESOLUTION", "INFO", "Ship-to details resolved from onboarding data.", getattr(po, "updated_at", None) or getattr(po, "created_at", None))
+
+        if getattr(po, "canonical_json", None) or getattr(po, "mapping_resolution_json", None) or getattr(po, "mappings_json", None):
+            add_log("mapped", "MAPPING", "INFO", "Extraction and mapping data available.", getattr(po, "updated_at", None) or getattr(po, "created_at", None))
+
+        if getattr(po, "processed_at", None):
+            add_log("processed", "PROCESSED", "INFO", "Output payload generated successfully.", getattr(po, "processed_at", None))
+
+        if getattr(po, "delivered_at", None):
+            add_log("delivered", "DELIVERED", "INFO", "Payload delivered to target endpoint.", getattr(po, "delivered_at", None))
+
+        return synthetic
 
     def get_processing_flow(self, db: Session, po_id) -> list[dict[str, Any]]:
         po = (
@@ -217,8 +334,11 @@ class MonitoringService:
                 {
                     "id": "message_received",
                     "name": "Message received",
+                    "step_name": "Message received",
+                    "stage": "RECEIVED",
                     "status": "DONE",
                     "timestamp": po.received_at.isoformat(),
+                    "created_at": po.received_at.isoformat(),
                     "details": "Inbound document received by platform",
                 }
             )
@@ -228,20 +348,31 @@ class MonitoringService:
                 {
                     "id": "job_created",
                     "name": "Job created",
+                    "step_name": "Job created",
+                    "stage": "JOB_CREATED",
                     "status": "DONE",
                     "timestamp": po.created_at.isoformat(),
+                    "created_at": po.created_at.isoformat(),
                     "details": "Processing job created for document",
                 }
             )
 
-        if getattr(po, "mappings_json", None):
-            updated_at_val = getattr(po, "updated_at", None)
+        if (
+            getattr(po, "mappings_json", None)
+            or getattr(po, "mapping_resolution_json", None)
+            or getattr(po, "canonical_json", None)
+            or getattr(po, "raw_text", None)
+        ):
+            updated_at_val = getattr(po, "updated_at", None) or getattr(po, "created_at", None)
             flow.append(
                 {
                     "id": "mapping_available",
                     "name": "Extraction / Mapping available",
+                    "step_name": "Extraction / Mapping available",
+                    "stage": "MAPPING",
                     "status": "DONE",
                     "timestamp": updated_at_val.isoformat() if updated_at_val else None,
+                    "created_at": updated_at_val.isoformat() if updated_at_val else None,
                     "details": "Fields extracted and/or user mappings available",
                 }
             )
@@ -251,8 +382,30 @@ class MonitoringService:
                 {
                     "id": "processed_xml_generated",
                     "name": "Processed / XML generated",
+                    "step_name": "Processed / XML generated",
+                    "stage": "PROCESSED",
                     "status": "DONE",
                     "timestamp": po.processed_at.isoformat(),
+                    "created_at": po.processed_at.isoformat(),
+                    "details": "Output payload generated successfully",
+                }
+            )
+
+        elif (
+            getattr(po, "xml_payload", None)
+            or getattr(po, "target_payload_json", None)
+            or str(getattr(po, "status", "") or "").upper() in {"PROCESSED", "SUCCESS"}
+        ):
+            processed_ts = getattr(po, "updated_at", None) or getattr(po, "created_at", None)
+            flow.append(
+                {
+                    "id": "processed_xml_generated",
+                    "name": "Processed / XML generated",
+                    "step_name": "Processed / XML generated",
+                    "stage": "PROCESSED",
+                    "status": "DONE",
+                    "timestamp": processed_ts.isoformat() if processed_ts else None,
+                    "created_at": processed_ts.isoformat() if processed_ts else None,
                     "details": "Output payload generated successfully",
                 }
             )
@@ -262,8 +415,11 @@ class MonitoringService:
                 {
                     "id": "delivered",
                     "name": "Delivered",
+                    "step_name": "Delivered",
+                    "stage": "DELIVERED",
                     "status": "DONE",
                     "timestamp": po.delivered_at.isoformat(),
+                    "created_at": po.delivered_at.isoformat(),
                     "details": "Payload delivered to target endpoint",
                 }
             )
@@ -273,8 +429,11 @@ class MonitoringService:
                 {
                     "id": "not_started",
                     "name": "Processing not started",
+                    "step_name": "Processing not started",
+                    "stage": "NOT_STARTED",
                     "status": getattr(po, "status", None) or "UNKNOWN",
                     "timestamp": None,
+                    "created_at": None,
                     "details": "No processing milestones available yet",
                 }
             )
@@ -409,13 +568,28 @@ class MonitoringService:
             "document_date",
             _safe_iso(getattr(row, "po_date", None)),
         )
+        client_row = db.query(models.Client).filter(models.Client.client_id == getattr(row, "client_id", None)).first()
+        def _clean_party_name(value: Any) -> str | None:
+            text = str(value or "").strip()
+            if not text:
+                return None
+            upper = text.upper()
+            if upper.startswith("PAGE_") or upper.startswith("PAGE ") or upper.startswith("PAGE-"):
+                return None
+            if "@" in text and "." in text:
+                return None
+            return text
+
         resolved_customer_name = mapping_value(
             "customer_name",
-            getattr(row, "sender", None),
+            _clean_party_name(getattr(client_row, "client_name", None)) or _clean_party_name(getattr(row, "receiver", None)),
         )
         resolved_supplier_name = mapping_value(
             "supplier_name",
-            getattr(row, "receiver", None) or getattr(row, "supplier_name", None),
+            _clean_party_name(getattr(row, "supplier_name", None))
+            or _clean_party_name(getattr(row, "partner_name", None))
+            or _clean_party_name(getattr(row, "trading_partner_name", None))
+            or _clean_party_name(getattr(row, "sender", None)),
         )
         resolved_document_type = mapping_value(
             "document_type",
@@ -424,6 +598,14 @@ class MonitoringService:
         resolved_order_type = mapping_value(
             "order_type",
             getattr(row, "order_type", None),
+        )
+        resolved_message_family_field = mapping_value(
+            "message_family",
+            getattr(row, "message_family", None) or getattr(row, "message_type", None) or getattr(row, "po_type", None),
+        )
+        resolved_message_type_field = mapping_value(
+            "message_type",
+            getattr(row, "message_type", None) or getattr(row, "message_family", None) or getattr(row, "po_type", None),
         )
         resolved_message_family_field = mapping_value(
             "message_family",
@@ -442,8 +624,14 @@ class MonitoringService:
             "ship_to_code",
             getattr(row, "ship_to", None),
         )
-        resolved_ship_to_name = mapping_value("ship_to_name", None)
-        resolved_ship_to_address = mapping_value("ship_to_address", None)
+        resolved_ship_to_name = mapping_value(
+            "ship_to_name",
+            getattr(row, "ship_to_name", None),
+        )
+        resolved_ship_to_address = mapping_value(
+            "ship_to_address",
+            getattr(row, "ship_to_address", None),
+        )
         header_details_raw = getattr(row, "header_details", None)
         resolved_header_details = mapping_value("header_details", header_details_raw if isinstance(header_details_raw, str) else None)
         header_details_json = _safe_json(header_details_raw)
@@ -469,6 +657,9 @@ class MonitoringService:
             key in header_details_json or key in mapping_full_map
             for key in invoice_like_keys
         )
+        show_family_fields = str(
+            resolved_message_family_field or resolved_message_type_field or resolved_document_type or ""
+        ).upper() in {"INVOICE", "AP_INVOICE", "AR_INVOICE", "ORDER_RESPONSE", "ORDER_CHANGE", "ASN", "ORDRSP", "ORDCHG", "DESADV"}
         show_family_fields = str(
             resolved_message_family_field or resolved_message_type_field or resolved_document_type or ""
         ).upper() in {"INVOICE", "AP_INVOICE", "AR_INVOICE", "ORDER_RESPONSE", "ORDER_CHANGE", "ASN", "ORDRSP", "ORDCHG", "DESADV"}
@@ -709,11 +900,12 @@ class MonitoringService:
         if file_id:
             file_row = db.query(models.FileStore).filter(models.FileStore.file_id == file_id).first()
 
-        resolved_direction = self._infer_direction(row)
+        resolved_business_direction = self._infer_direction(row)
         if self._has_outbound_message(db, row):
-            resolved_direction = "OUTBOUND"
+            resolved_business_direction = "OUTBOUND"
+        resolved_transport_direction = self._infer_transport_direction(row)
         looks_like_invoice = self._looks_like_invoice(row)
-        preview_payload_source = getattr(row, "xml_payload", None) if resolved_direction == "OUTBOUND" else None
+        preview_payload_source = getattr(row, "xml_payload", None) if resolved_business_direction == "OUTBOUND" else None
         if isinstance(preview_payload_source, (dict, list)):
             preview_text = json.dumps(preview_payload_source, ensure_ascii=False, indent=2, default=str)
         elif preview_payload_source not in [None, ""]:
@@ -729,15 +921,29 @@ class MonitoringService:
         )
         base_mime_type = getattr(file_row, "mime_type", None) or getattr(row, "target_content_type", None) or "application/pdf"
         explicit_message_type = str(getattr(row, "message_type", None) or "").upper()
+        document_family_seed = str(
+            resolved_message_family_field
+            or resolved_message_type_field
+            or resolved_document_type
+            or resolved_order_type
+            or getattr(row, "po_type", None)
+            or ""
+        ).upper()
+        is_po_family = document_family_seed in {"PO", "ORDERS", "ORDER", "ORDER_RESPONSE", "ORDER_CHANGE", "ASN", "ORDRSP", "ORDCHG", "DESADV"}
         invoice_context = (
-            explicit_message_type in {"INVOICE", "AP_INVOICE", "AR_INVOICE"}
-            or str(resolved_document_type or resolved_order_type or getattr(row, "po_type", None) or "").upper() == "INVOICE"
-            or looks_like_invoice
+            not is_po_family
+            and (
+                explicit_message_type in {"INVOICE", "AP_INVOICE", "AR_INVOICE"}
+                or str(resolved_document_type or resolved_order_type or getattr(row, "po_type", None) or "").upper() == "INVOICE"
+                or (looks_like_invoice and not is_po_family)
+            )
         )
-        if explicit_message_type in {"AP_INVOICE", "AR_INVOICE"}:
+        if explicit_message_type in {"AP_INVOICE", "AR_INVOICE"} and not is_po_family:
             resolved_message_type = explicit_message_type
         elif invoice_context:
-            resolved_message_type = "AR_INVOICE" if resolved_direction == "OUTBOUND" else "AP_INVOICE"
+            resolved_message_type = "AR_INVOICE" if resolved_business_direction == "OUTBOUND" else "AP_INVOICE"
+        elif is_po_family:
+            resolved_message_type = "ORDERS"
         else:
             resolved_message_type = (
                 resolved_order_type
@@ -748,8 +954,8 @@ class MonitoringService:
             )
         resolved_message_family = (
             "INVOICE"
-            if invoice_context or str(resolved_message_type or "").upper() in {"INVOICE", "AP_INVOICE", "AR_INVOICE"}
-            else str(resolved_order_type or resolved_document_type or getattr(row, "po_type", None) or "ORDERS").upper()
+            if invoice_context and not is_po_family
+            else ("PO" if is_po_family else str(resolved_order_type or resolved_document_type or getattr(row, "po_type", None) or "ORDERS").upper())
         )
 
         return {
@@ -887,9 +1093,12 @@ class MonitoringService:
             "header_details": resolved_header_details,
             "invoice_fields": header_details_json if show_invoice_fields else None,
             "status": getattr(row, "status", None),
-            "sender": resolved_customer_name,
-            "receiver": resolved_supplier_name,
-            "direction": resolved_direction,
+            "sender": getattr(row, "sender", None) or resolved_supplier_name,
+            "receiver": getattr(row, "receiver", None) or resolved_customer_name,
+            "direction": resolved_business_direction,
+            "business_direction": resolved_business_direction,
+            "transport_direction": resolved_transport_direction,
+            "source_channel": getattr(row, "source_channel", None) or getattr(row, "source_type", None),
             "environment": getattr(row, "environment", None),
             "source_type": getattr(row, "source_type", None),
             "po_confidence": getattr(row, "po_confidence", None),

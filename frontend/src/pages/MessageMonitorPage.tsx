@@ -166,6 +166,9 @@ export default function MessageMonitorPage() {
         fromDate,
         toDate,
       });
+      if (scope.clientId) {
+        params.set("client_id", scope.clientId);
+      }
       console.log("statusFilter sent =", statusFilter);
       const res = await fetch(`${API_BASE}/monitoring/queue?${params.toString()}`, {
         headers: getAuthHeaders(),
@@ -182,7 +185,7 @@ export default function MessageMonitorPage() {
       isRefreshingRef.current = false;
       setLoading(false);
     }
-  }, [direction, environment, fromDate, search, statusFilter, toDate]);
+  }, [direction, environment, fromDate, scope.clientId, search, statusFilter, toDate]);
 
   useEffect(() => {
     setEnvironment(scope.environment || "PROD");
