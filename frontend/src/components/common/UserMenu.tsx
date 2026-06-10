@@ -32,9 +32,9 @@ export default function UserMenu() {
   const auth = getAuth();
   const { scope } = useAppScope();
   const environment = scope.environment ? workspaceEnvironmentBadge(scope.environment) : getFrontendEnvironmentLabel();
-  const activeClientId = auth?.client_id || scope.clientId;
+  const activeClientId = scope.clientId || auth?.client_id;
   const storefrontPath = canAccessModule(auth, "buyer_storefront")
-    ? buildStorefrontPath(activeClientId, scope.environment || environment)
+    ? buildStorefrontPath(activeClientId, scope.environment || auth?.environment || environment)
     : "";
 
   useEffect(() => {

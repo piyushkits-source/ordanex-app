@@ -31,9 +31,9 @@ export default function TopBar() {
   const auth = getAuth();
   const navigate = useNavigate();
   const [environment, setEnvironment] = useState(getFrontendEnvironmentLabel());
-  const activeClientId = auth?.client_id || scope.clientId;
+  const activeClientId = scope.clientId || auth?.client_id;
   const storefrontPath = canAccessModule(auth, "buyer_storefront")
-    ? buildStorefrontPath(activeClientId, scope.environment || environment)
+    ? buildStorefrontPath(activeClientId, scope.environment || auth?.environment || environment)
     : "";
 
   useEffect(() => {

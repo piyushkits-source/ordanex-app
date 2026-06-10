@@ -1,4 +1,4 @@
-import { Routes, Route, Navigate } from "react-router-dom";
+import { Routes, Route, Navigate, useParams } from "react-router-dom";
 import MessageMonitorPage from "./pages/MessageMonitorPage";
 import ClientConfigWorkspacePage from "./pages/ClientConfigWorkspacePage";
 import TradingPartnerPage from "./pages/TradingPartnerPage";
@@ -9,13 +9,12 @@ import UsersPage from "./pages/UsersPage";
 import ReportsPage from "./pages/ReportsPage";
 import AnalyticsPage from "./pages/AnalyticsPage";
 import BuyerPortalPage from "./pages/BuyerPortalPage";
-import SupplierOrdersPage from "./pages/SupplierOrdersPage";
-import SupplierCommerceDeskPage from "./pages/SupplierCommerceDeskPage";
 import ProtectedRoute from "./components/auth/ProtectedRoute";
 import PublicRoute from "./components/auth/PublicRoute";
 import AccessRoute from "./components/auth/AccessRoute";
 import AppLayout from "./app/layout/AppLayout";
 import { clearAuthOnAppBoot, getAuth, getPostLoginPath } from "./utils/auth";
+import { buildMonitoringPath } from "./utils/environment";
 
 function Placeholder({ title }: { title: string }) {
   return (
@@ -38,6 +37,31 @@ function Placeholder({ title }: { title: string }) {
 function HomeRedirect() {
   const auth = getAuth();
   return <Navigate to={auth?.access_token ? getPostLoginPath(auth.role) : "/login"} replace />;
+}
+
+function SupplierOrdersRedirect() {
+  const { clientId, environment } = useParams<{ clientId?: string; environment?: string }>();
+  return (
+    <Navigate
+      to={buildMonitoringPath({
+        clientId,
+        environment,
+      })}
+      replace
+    />
+  );
+}
+
+function SupplierCommerceRedirect() {
+  const { poId } = useParams<{ poId?: string }>();
+  return (
+    <Navigate
+      to={buildMonitoringPath({
+        poId,
+      })}
+      replace
+    />
+  );
 }
 
 export default function App() {
@@ -85,9 +109,9 @@ export default function App() {
         <Route path="/business-rules" element={<AccessRoute moduleKey="business_rules"><Placeholder title="Business Rules" /></AccessRoute>} />
         <Route path="/reports" element={<AccessRoute moduleKey="reports"><ReportsPage /></AccessRoute>} />
         <Route path="/analytics" element={<AccessRoute moduleKey="analytics"><AnalyticsPage /></AccessRoute>} />
-        <Route path="/supplier/:clientId/orders" element={<AccessRoute moduleKey="client_config"><SupplierOrdersPage /></AccessRoute>} />
-        <Route path="/supplier/:environment/:clientId/orders" element={<AccessRoute moduleKey="client_config"><SupplierOrdersPage /></AccessRoute>} />
-        <Route path="/supplier/orders/:poId/commerce" element={<AccessRoute moduleKey="client_config"><SupplierCommerceDeskPage /></AccessRoute>} />
+        <Route path="/supplier/:clientId/orders" element={<AccessRoute moduleKey="monitoring"><SupplierOrdersRedirect /></AccessRoute>} />
+        <Route path="/supplier/:environment/:clientId/orders" element={<AccessRoute moduleKey="monitoring"><SupplierOrdersRedirect /></AccessRoute>} />
+        <Route path="/supplier/orders/:poId/commerce" element={<AccessRoute moduleKey="monitoring"><SupplierCommerceRedirect /></AccessRoute>} />
       </Route>
 
       <Route path="*" element={<Navigate to="/" replace />} />

@@ -12,6 +12,7 @@ import {
 import { getAuth } from "../../utils/auth";
 import { canAccessModule, type AppModuleKey } from "../../utils/access";
 import { buildStorefrontPath } from "../../utils/environment";
+import { useAppScope } from "../../context/AppScopeContext";
 
 const menu = [
   { label: "Message Monitor", path: "/monitoring", icon: <FaInbox />, moduleKey: "monitoring" as AppModuleKey },
@@ -27,6 +28,7 @@ const menu = [
 export default function Sidebar() {
   const location = useLocation();
   const auth = getAuth();
+  const { scope } = useAppScope();
   const visibleMenu = menu.filter((item) => canAccessModule(auth, item.moduleKey));
 
   return (
@@ -36,7 +38,7 @@ export default function Sidebar() {
       {visibleMenu.map((item) => {
         const resolvedPath =
           item.path === "/portal"
-            ? buildStorefrontPath(auth?.client_id, auth?.environment) || item.path
+            ? buildStorefrontPath(scope.clientId || auth?.client_id, scope.environment || auth?.environment) || item.path
             : item.path;
         const active = location.pathname.startsWith(item.path);
 
