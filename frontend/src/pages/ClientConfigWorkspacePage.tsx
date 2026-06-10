@@ -6,6 +6,7 @@ import BusinessVerticalSection from "components/client_config/sections/BusinessV
 import ClientConnectionsSection from "components/client_config/sections/ClientConnectionsSection";
 import ClientErpMessagesSection from "components/client_config/sections/ClientErpMessagesSection";
 import ClientStorefrontSection from "components/client_config/sections/ClientStorefrontSection";
+import ClientCommercialSection from "components/client_config/sections/ClientCommercialSection";
 import { apiFetch, parseApiError } from "utils/api";
 import { useAppScope } from "context/AppScopeContext";
 
@@ -22,11 +23,12 @@ type ClientRow = {
   default_ship_to?: string | null;
 };
 
-type SectionKey = "CLIENT" | "STOREFRONT" | "VERTICALS" | "CONNECTIONS" | "ERP";
+type SectionKey = "CLIENT" | "STOREFRONT" | "COMMERCIAL" | "VERTICALS" | "CONNECTIONS" | "ERP";
 
 const sections: { key: SectionKey; label: string; helper: string }[] = [
   { key: "CLIENT", label: "Client Master", helper: "Identity, subscription, workspace defaults, legal, billing, and banking setup" },
   { key: "STOREFRONT", label: "Storefront", helper: "Buyer portal setup, approval list, and catalog source" },
+  { key: "COMMERCIAL", label: "Commercial", helper: "Commercial source, ERP sync, charge codes, and checkout precedence" },
   { key: "VERTICALS", label: "Business Verticals", helper: "Business entities that operate under the client" },
   { key: "CONNECTIONS", label: "Client Connections", helper: "How the client exchanges messages with Ordanex" },
   { key: "ERP", label: "ERP & Message Types", helper: "ERP landscape, formats, message types, and directions" },
@@ -78,6 +80,12 @@ export default function ClientConfigWorkspacePage() {
     }
   }, [setVerticalScope]);
 
+  useEffect(() => {
+    if (isProductionSelected && createMode) {
+      setCreateMode(false);
+    }
+  }, [createMode, isProductionSelected]);
+
   async function loadClients() {
     try {
       setLoading(true);
@@ -127,6 +135,10 @@ export default function ClientConfigWorkspacePage() {
   }
 
   function handleNewClient() {
+    if (isProductionSelected) {
+      setBanner({ type: "info", text: "Switch to Staging to create a new client." });
+      return;
+    }
     setCreateMode(true);
     setSelectedClientId("");
     setClientScope({ clientId: "", clientName: "" });
@@ -207,9 +219,11 @@ export default function ClientConfigWorkspacePage() {
         <div style={leftPanel}>
           <div style={panelTopRow}>
             <div style={panelTitle}>Clients</div>
-            <button type="button" onClick={handleNewClient} style={newButton}>
-              + New Client
-            </button>
+            {!isProductionSelected ? (
+              <button type="button" onClick={handleNewClient} style={newButton}>
+                + New Client
+              </button>
+            ) : null}
           </div>
 
           <label style={searchWrap}>
@@ -292,6 +306,7 @@ export default function ClientConfigWorkspacePage() {
               {activeSection === "CLIENT" && (
                 <ClientMasterSection
                   client={createMode ? null : selectedClient}
+                  readOnly={isProductionSelected}
                   onSaved={async () => {
                     setCreateMode(false);
                     await loadClients();
@@ -303,6 +318,15 @@ export default function ClientConfigWorkspacePage() {
               {activeSection === "STOREFRONT" && selectedClient && (
                 <ClientStorefrontSection
                   client={selectedClient}
+                  onBanner={(text, type = "success") => setBanner({ text, type })}
+                />
+              )}
+
+              {activeSection === "COMMERCIAL" && selectedClient && (
+                <ClientCommercialSection
+                  client={selectedClient}
+                  environment={scope.environment || "PROD"}
+                  readOnly={isProductionSelected}
                   onBanner={(text, type = "success") => setBanner({ text, type })}
                 />
               )}

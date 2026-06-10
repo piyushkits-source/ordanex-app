@@ -44,6 +44,7 @@ type ClientProfileDetails = {
 
 type Props = {
   client: ClientRow | null;
+  readOnly?: boolean;
   onSaved: () => Promise<void> | void;
   onBanner: (text: string, type?: "success" | "error" | "info") => void;
 };
@@ -87,7 +88,7 @@ const emptyProfileDetails: ClientProfileDetails = {
   },
 };
 
-export default function ClientMasterSection({ client, onSaved, onBanner }: Props) {
+export default function ClientMasterSection({ client, readOnly = false, onSaved, onBanner }: Props) {
   const [form, setForm] = useState<ClientRow>(emptyForm);
   const [profileDetails, setProfileDetails] = useState<ClientProfileDetails>(emptyProfileDetails);
   const [loading, setLoading] = useState(false);
@@ -136,6 +137,10 @@ export default function ClientMasterSection({ client, onSaved, onBanner }: Props
 
   async function saveClient() {
     try {
+      if (readOnly) {
+        onBanner("Client master is read-only in Production. Switch to Staging to make changes.", "info");
+        return;
+      }
       setLoading(true);
       if (!form.client_id.trim()) throw new Error("Client ID is required.");
       if (!form.client_name.trim()) throw new Error("Client Name is required.");
@@ -196,6 +201,8 @@ export default function ClientMasterSection({ client, onSaved, onBanner }: Props
 
   return (
     <div>
+      {readOnly ? <div style={readOnlyBanner}>Production is read-only for Client Master changes. Use Staging for edits and controlled promotion.</div> : null}
+      <fieldset style={editorFieldset} disabled={readOnly || loading}>
       <div style={headerRow}>
         <div>
           <div style={title}>{client ? "Client Master" : "Create Client"}</div>
@@ -287,10 +294,11 @@ export default function ClientMasterSection({ client, onSaved, onBanner }: Props
       </div>
 
       <div style={buttonRow}>
-        <button type="button" style={primaryButton} onClick={saveClient} disabled={loading}>
-          {loading ? "Saving..." : client ? "Save Client Master" : "Create Client"}
+        <button type="button" style={primaryButton} onClick={saveClient} disabled={readOnly || loading}>
+          {readOnly ? "Production is read-only" : loading ? "Saving..." : client ? "Save Client Master" : "Create Client"}
         </button>
       </div>
+      </fieldset>
     </div>
   );
 }
@@ -321,3 +329,6 @@ const inputStyleDisabled: React.CSSProperties = { ...inputStyle, background: "#f
 const textAreaStyle: React.CSSProperties = { ...inputStyle, minHeight: 88, resize: "vertical" as const };
 const buttonRow: React.CSSProperties = { display: "flex", gap: 10, marginTop: 16 };
 const primaryButton: React.CSSProperties = { border: "1px solid #0b5fff", background: "#0b5fff", color: "#fff", borderRadius: 10, padding: "10px 16px", fontSize: 13, fontWeight: 700, cursor: "pointer" };
+
+const editorFieldset: React.CSSProperties = { border: 0, padding: 0, margin: 0, minInlineSize: 0 };
+const readOnlyBanner: React.CSSProperties = { marginBottom: 14, border: "1px solid #fecaca", borderRadius: 10, padding: "10px 12px", fontSize: 13, fontWeight: 600, color: "#b91c1c", background: "#fef2f2" };

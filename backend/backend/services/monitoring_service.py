@@ -4,7 +4,7 @@ import json
 from typing import Any
 from uuid import UUID
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import or_
+from sqlalchemy import or_, func
 import csv
 import io
 
@@ -175,17 +175,17 @@ class MonitoringService:
 
         env = (environment or "").upper()
 
-        if env == "STAGING":
+        if env in {"STAGING", "STAGE", "STG"}:
             query = query.filter(
                 or_(
-                    models.PurchaseOrder.environment == "STAGING",
+                    func.upper(models.PurchaseOrder.environment).in_(["STAGING", "STAGE", "STG"]),
                     models.PurchaseOrder.environment.is_(None),
                 )
             )
-        elif env == "PROD":
+        elif env in {"PROD", "PRODUCTION"}:
             query = query.filter(
                 or_(
-                    models.PurchaseOrder.environment == "PROD",
+                    func.upper(models.PurchaseOrder.environment).in_(["PROD", "PRODUCTION"]),
                     models.PurchaseOrder.environment.is_(None),
                 )
             )
