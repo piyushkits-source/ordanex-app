@@ -209,10 +209,61 @@ class BuyerPortalService:
 
     def _portal_url(self, client_id: str, environment: str | None = None) -> str:
         base = os.getenv("FRONTEND_BASE_URL") or os.getenv("APP_BASE_URL") or "http://127.0.0.1:5173"
-        environment_code = self._normalize_environment(environment)
-        if environment_code == "STAGING":
-            return f"{base.rstrip('/')}/portal/staging/{quote(client_id, safe='')}"
         return f"{base.rstrip('/')}/portal/{quote(client_id, safe='')}"
+
+    def _send_buyer_order_received_email(self, po: models.PurchaseOrder, meta: dict[str, Any]) -> None:
+        buyer_email = self._normalize_email(meta.get("buyer_email"))
+        if not buyer_email:
+            return
+
+        po_ref = getattr(po, "po_number", None) or str(getattr(po, "po_id", ""))
+        supplier_name = str(
+            getattr(po, "supplier_name", None)
+            or meta.get("supplier_display_name")
+            or "Configured Supplier"
+        ).strip()
+        environment_code = self._normalize_environment(getattr(po, "environment", None))
+        portal_url = self._portal_url(po.client_id, environment_code)
+        payment_status = str(meta.get("payment_status") or "").strip() or self._derive_payment_status(
+            payments_enabled=bool(meta.get("payments_enabled", True)),
+            payment_mode=str(meta.get("payment_mode") or "INVOICE_LATER").strip().upper(),
+            payment_reference=meta.get("payment_reference"),
+        )
+        payment_terms = str(meta.get("payment_terms") or "").strip()
+        payment_method = str(meta.get("payment_method") or "").strip()
+        payment_reference = str(meta.get("payment_reference") or "").strip()
+
+        highlights = [
+            f"Order received: {po_ref}",
+            f"Supplier: {supplier_name}",
+            f"Current status: {getattr(po, 'status', None) or 'NEW'}",
+            f"Payment status: {payment_status}",
+        ]
+        if payment_method:
+            highlights.append(f"Payment method: {payment_method}")
+        if payment_terms:
+            highlights.append(f"Payment terms: {payment_terms}")
+        if payment_reference:
+            highlights.append(f"Payment reference: {payment_reference}")
+
+        body_html = "".join(
+            [
+                "<h2>Buyer Order Received</h2>",
+                f"<p><strong>Supplier:</strong> {supplier_name}</p>",
+                f"<p><strong>Order:</strong> {po_ref}</p>",
+                f"<p><strong>Environment:</strong> {environment_code}</p>",
+                "<p>Your order was received in Ordanex and is now visible for processing and fulfillment updates.</p>",
+                "<ul>",
+                "".join(f"<li>{item}</li>" for item in highlights),
+                "</ul>",
+                f'<p><a href="{portal_url}">Open buyer portal</a> to track invoice, payment, shipment, and delivery updates.</p>',
+            ]
+        )
+        subject = f"[Ordanex] Order received: {po_ref}"
+        try:
+            send_application_email([buyer_email], subject, body_html)
+        except Exception:
+            return
 
     def _send_buyer_update_email(
         self,
@@ -1269,6 +1320,14 @@ class BuyerPortalService:
                 db.commit()
                 db.refresh(po)
 
+        po = (
+            db.query(models.PurchaseOrder)
+            .options(joinedload(models.PurchaseOrder.items))
+            .filter(models.PurchaseOrder.po_id == po.po_id)
+            .first()
+            or po
+        )
+        self._send_buyer_order_received_email(po, self._parse_header_details(po.header_details))
         return BuyerPortalResult(purchase_order=po, processed=processed)
 
     def get_order(self, db: Session, po_id):

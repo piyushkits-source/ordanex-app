@@ -40,9 +40,7 @@ function resolveClientId(explicitClientId?: string) {
   return parts[parts.length - 1] || "";
 }
 
-function resolvePortalEnvironment(explicitEnvironment?: string) {
-  const normalized = String(explicitEnvironment || "").trim().toLowerCase();
-  if (normalized === "staging" || normalized === "stage" || normalized === "stg") return "staging";
+function resolvePortalEnvironment(_explicitEnvironment?: string) {
   return "production";
 }
 

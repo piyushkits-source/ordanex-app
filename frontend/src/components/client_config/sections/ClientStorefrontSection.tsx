@@ -3,7 +3,7 @@ import type { CSSProperties, ChangeEvent } from "react";
 import { absoluteFileUrl } from "../../../api/apiClient";
 import { apiFetch, parseApiError } from "utils/api";
 import { uploadPortalFile } from "../../../api/fileStorageApi";
-import { buildStorefrontPath, storefrontEnvironmentSlug, workspaceEnvironmentBadge } from "../../../utils/environment";
+import { buildStorefrontPath, workspaceEnvironmentBadge } from "../../../utils/environment";
 import { useAppScope } from "../../../context/AppScopeContext";
 
 type Props = {
@@ -909,7 +909,7 @@ export default function ClientStorefrontSection({ client, onBanner }: Props) {
           <div style={sharedBanner}>
             {isProductionWorkspace
               ? "Production storefront settings are read-only. Use the Staging workspace to prepare access, catalog, pricing, and buyer rules, then publish them to production."
-              : `You are editing the ${storefrontEnvironmentSlug(activeEnvironment)} storefront configuration for ${activeEnvironmentLabel}. Save here, test the staging buyer URL, and publish to production when ready.`}
+              : `You are editing the ${activeEnvironmentLabel} storefront draft. Save changes here, validate the draft configuration internally, and publish to production when ready. The live buyer portal always uses the production URL.`}
           </div>
         </div>
         <div style={actionsRow}>
@@ -957,7 +957,7 @@ export default function ClientStorefrontSection({ client, onBanner }: Props) {
         </div>
         <div style={statusCard}>
           <div style={label}>Open storefront target</div>
-          <div style={value}>{activeEnvironmentLabel}</div>
+          <div style={value}>Production buyer portal</div>
         </div>
         <div style={statusCard}>
           <div style={label}>Seller model</div>
