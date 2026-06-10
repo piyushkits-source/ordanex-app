@@ -12,6 +12,7 @@ import {
   type BuyerPortalOrderItem,
   type BuyerPortalSettings,
 } from "../api/buyerPortalApi";
+import { absoluteFileUrl } from "../api/apiClient";
 import { uploadPortalFile } from "../api/fileStorageApi";
 
 type Props = {
@@ -80,8 +81,14 @@ function normalizeMedia(item: BuyerPortalCatalogItem): BuyerPortalMediaItem[] {
   }
   return media.map((entry) => ({
     ...entry,
+    url: absoluteFileUrl(entry.url),
+    poster_url: absoluteFileUrl(entry.poster_url || ""),
     kind: entry.kind || (/\.(mp4|webm|ogg)$/i.test(entry.url) ? "video" : "image"),
   }));
+}
+
+function normalizeBrandLogoUrl(value?: string | null) {
+  return absoluteFileUrl(value || "");
 }
 
 function buildTrackingSteps(
@@ -259,6 +266,7 @@ export default function BuyerPortalPage({ clientId: propClientId }: Props) {
 
   const branding = portalSettings?.branding || {};
   const storefrontTitle = branding.storefront_title || "Buyer Portal";
+  const brandLogoUrl = normalizeBrandLogoUrl(branding.logo_url);
   const heroHeadline =
     branding.hero_headline ||
     "Shop products, submit orders, track fulfillment, and keep buyers informed in one storefront.";
@@ -291,6 +299,15 @@ export default function BuyerPortalPage({ clientId: propClientId }: Props) {
   const showProductSpecs = experience.show_product_specs !== false;
   const showInventoryStatus = experience.show_inventory_status !== false;
   const showCheckoutPromises = experience.show_checkout_promises !== false;
+  const supplierPortalLabel = supplierDisplayName && supplierDisplayName !== storefrontTitle
+    ? `${supplierDisplayName} Supplier Portal`
+    : storefrontTitle;
+  const availableCount = catalog.filter((item) => String(item.stock_status || "Available").toLowerCase() !== "out of stock").length;
+  const categoryCount = Math.max(0, categories.length - 1);
+  const compactHeadline =
+    sellerMode === "STANDALONE_COMMERCE"
+      ? "A protected buying surface for supplier-managed commerce."
+      : "A buyer-friendly portal powered by the Ordanex transaction backbone.";
 
   const trackingSteps =
     Array.isArray(submittedOrder?.tracking_steps) && submittedOrder?.tracking_steps.length
@@ -576,19 +593,52 @@ export default function BuyerPortalPage({ clientId: propClientId }: Props) {
   return (
     <div style={shell}>
       <div style={{ maxWidth: 1440, margin: "0 auto", padding: "24px 18px 40px" }}>
-        <div style={{ marginBottom: 16 }}>
-          <div style={{ fontSize: 34, fontWeight: 900, color: "#0f172a" }}>{storefrontTitle}</div>
-          <div style={{ marginTop: 8, color: "#64748b", lineHeight: 1.6 }}>
-            Browse the catalog, place a buyer order, and track supplier and ERP status from one place.
+        <section style={{ ...panel, padding: 20, marginBottom: 16, background: "linear-gradient(180deg, #ffffff 0%, #f8fbff 100%)" }}>
+          <div style={portalHeaderGrid}>
+            <div style={{ display: "grid", gap: 14 }}>
+              <div style={{ display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
+                {brandLogoUrl ? (
+                  <div style={brandLogoShell}>
+                    <img src={brandLogoUrl} alt={supplierPortalLabel} style={brandLogoImage} />
+                  </div>
+                ) : (
+                  <div style={brandMonogram}>{supplierDisplayName.slice(0, 1).toUpperCase() || "S"}</div>
+                )}
+                <div style={{ minWidth: 0 }}>
+                  <div style={brandEyebrow}>Supplier storefront powered by Ordanex</div>
+                  <div style={brandTitle}>{supplierPortalLabel}</div>
+                  <div style={brandSubtitle}>{compactHeadline}</div>
+                </div>
+              </div>
+              <div style={brandPillRow}>
+                <span style={{ ...brandPill, background: "#dbeafe", color: "#1d4ed8", borderColor: "#bfdbfe" }}>Protected media session</span>
+                <span style={brandPill}>{approvedBuyerEmail}</span>
+                <span style={brandPill}>{supplierDisplayName}</span>
+                <button type="button" onClick={resetBuyerAccess} style={ghostButton}>
+                  Switch buyer email
+                </button>
+              </div>
+            </div>
+
+            <div style={headerMetricsGrid}>
+              <div style={metricCard}>
+                <div style={metricLabel}>Products</div>
+                <div style={metricValue}>{catalog.length}</div>
+                <div style={metricHint}>{availableCount} available now</div>
+              </div>
+              <div style={metricCard}>
+                <div style={metricLabel}>Categories</div>
+                <div style={metricValue}>{categoryCount}</div>
+                <div style={metricHint}>Structured supplier assortment</div>
+              </div>
+              <div style={metricCard}>
+                <div style={metricLabel}>Support</div>
+                <div style={metricValueWide}>{supportEmail}</div>
+                <div style={metricHint}>Buyer assistance and order follow-up</div>
+              </div>
+            </div>
           </div>
-          <div style={{ marginTop: 10, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-            <span style={{ ...heroPill, background: "#dbeafe", color: "#1d4ed8" }}>Protected media session</span>
-            <span style={{ ...heroPill, background: "#eff6ff", color: "#1e3a8a" }}>{approvedBuyerEmail}</span>
-            <button type="button" onClick={resetBuyerAccess} style={ghostButton}>
-              Switch buyer email
-            </button>
-          </div>
-        </div>
+        </section>
 
         {banner ? (
           <div style={{ ...panel, borderColor: "#c7d2fe", background: "#eff6ff", color: "#1d4ed8", padding: 14, marginBottom: 16, fontWeight: 700 }}>
@@ -599,21 +649,50 @@ export default function BuyerPortalPage({ clientId: propClientId }: Props) {
         <section style={{ ...panel, padding: 18, marginBottom: 16 }}>
           <div style={heroGrid}>
             <div style={{ ...heroCard, background: `linear-gradient(135deg, ${accentColor} 0%, #1d4ed8 42%, #0f172a 100%)` }}>
-              <div>
-                <div style={heroEyebrow}>Catalog to cash</div>
-                <div style={heroTitle}>{heroHeadline}</div>
-                <p style={heroDescriptionStyle}>{heroDescription}</p>
+              <div style={{ display: "grid", gap: 16 }}>
+                <div>
+                  <div style={heroEyebrow}>Catalog to cash</div>
+                  <div style={heroTitle}>{heroHeadline}</div>
+                  <p style={heroDescriptionStyle}>{heroDescription}</p>
+                </div>
+                <div style={heroBrandBlock}>
+                  <div style={heroBrandName}>{supplierDisplayName}</div>
+                  <div style={heroBrandText}>
+                    Buyers can browse supplier-approved products, place orders, upload payment proof, and track fulfillment from one guided workspace.
+                  </div>
+                </div>
+                <div style={heroMiniGrid}>
+                  <div style={heroMiniCard}>
+                    <div style={heroMiniLabel}>Catalog</div>
+                    <div style={heroMiniValue}>{catalogTitle}</div>
+                  </div>
+                  <div style={heroMiniCard}>
+                    <div style={heroMiniLabel}>Payments</div>
+                    <div style={heroMiniValue}>{paymentsEnabled ? paymentProvider : "Supplier direct"}</div>
+                  </div>
+                  <div style={heroMiniCard}>
+                    <div style={heroMiniLabel}>Tracking</div>
+                    <div style={heroMiniValue}>{buyerTrackingMode === "PORTAL_UPDATES" ? "Portal updates" : "ERP and shipment visibility"}</div>
+                  </div>
+                </div>
               </div>
-              <div style={heroPillRow}>
-                <span style={heroPill}>{sellerMode === "STANDALONE_COMMERCE" ? "Supplier without ERP" : "ERP-integrated supplier"}</span>
-                <span style={heroPill}>{orderFlowMode === "ORDANEX_MANAGED" ? "Ordanex-managed order flow" : "ERP-orchestrated order flow"}</span>
-                <span style={heroPill}>{buyerTrackingMode === "PORTAL_UPDATES" ? "Portal updates" : "Live ERP / fulfillment tracking"}</span>
-                <span style={heroPill}>Support: {supportEmail}</span>
+              <div>
+                <div style={heroPillRow}>
+                  <span style={heroPill}>{sellerMode === "STANDALONE_COMMERCE" ? "Supplier without ERP" : "ERP-integrated supplier"}</span>
+                  <span style={heroPill}>{orderFlowMode === "ORDANEX_MANAGED" ? "Ordanex-managed order flow" : "ERP-orchestrated order flow"}</span>
+                  <span style={heroPill}>{buyerTrackingMode === "PORTAL_UPDATES" ? "Portal updates" : "Live ERP / fulfillment tracking"}</span>
+                </div>
               </div>
             </div>
 
             <div style={{ ...panel, padding: 18, display: "grid", gap: 12 }}>
-              <div style={sectionLabel}>Buyer details</div>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+                <div>
+                  <div style={sectionLabel}>Buyer details</div>
+                  <div style={mutedSmall}>Place an order with supplier and payment context in one step.</div>
+                </div>
+                <div style={checkoutHint}>Order desk</div>
+              </div>
               <input style={field} placeholder="Buyer name" value={buyerName} onChange={(e) => setBuyerName(e.target.value)} />
               <input style={{ ...field, background: "#f8fafc" }} placeholder="Buyer email" value={buyerEmail} readOnly />
               <input style={field} placeholder="Company name" value={companyName} onChange={(e) => setCompanyName(e.target.value)} />
@@ -915,7 +994,7 @@ export default function BuyerPortalPage({ clientId: propClientId }: Props) {
                       <div style={mutedText}>Document: {submittedOrder.payment_proof_name || "Uploaded proof"}</div>
                       {submittedOrder.payment_proof_url || submittedOrder.payment_proof_data_url ? (
                         <a
-                          href={submittedOrder.payment_proof_url || submittedOrder.payment_proof_data_url || "#"}
+                          href={absoluteFileUrl(submittedOrder.payment_proof_url || submittedOrder.payment_proof_data_url || "#")}
                           target="_blank"
                           rel="noreferrer"
                           style={linkCta}
@@ -936,7 +1015,7 @@ export default function BuyerPortalPage({ clientId: propClientId }: Props) {
                       </div>
                       <div style={mutedText}>Due date: {submittedOrder.invoice.due_date || "Pending"}</div>
                       <div style={mutedText}>Payment status: {submittedOrder.invoice.payment_status || submittedOrder.payment_status || "Pending"}</div>
-                      {submittedOrder.invoice.invoice_url ? <a href={submittedOrder.invoice.invoice_url} target="_blank" rel="noreferrer" style={linkCta}>Open invoice</a> : null}
+                      {submittedOrder.invoice.invoice_url ? <a href={absoluteFileUrl(submittedOrder.invoice.invoice_url)} target="_blank" rel="noreferrer" style={linkCta}>Open invoice</a> : null}
                     </div>
                   ) : null}
                   {submittedOrder.shipment ? (
@@ -1148,6 +1227,133 @@ const tag: React.CSSProperties = {
   fontWeight: 700,
 };
 
+const portalHeaderGrid: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "minmax(0, 1.4fr) minmax(300px, 0.9fr)",
+  gap: 16,
+  alignItems: "start",
+};
+
+const brandLogoShell: React.CSSProperties = {
+  width: 72,
+  height: 72,
+  borderRadius: 20,
+  background: "linear-gradient(180deg, #ffffff 0%, #eff6ff 100%)",
+  border: "1px solid #dbeafe",
+  boxShadow: "0 14px 36px rgba(37, 99, 235, 0.12)",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  padding: 10,
+  overflow: "hidden",
+};
+
+const brandLogoImage: React.CSSProperties = {
+  width: "100%",
+  height: "100%",
+  objectFit: "contain",
+  display: "block",
+};
+
+const brandMonogram: React.CSSProperties = {
+  width: 72,
+  height: 72,
+  borderRadius: 20,
+  background: "linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)",
+  color: "#fff",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  fontSize: 28,
+  fontWeight: 900,
+  boxShadow: "0 14px 36px rgba(37, 99, 235, 0.18)",
+};
+
+const brandEyebrow: React.CSSProperties = {
+  fontSize: 12,
+  fontWeight: 800,
+  color: "#2563eb",
+  letterSpacing: 0.08,
+  textTransform: "uppercase",
+};
+
+const brandTitle: React.CSSProperties = {
+  marginTop: 6,
+  fontSize: 34,
+  lineHeight: 1.05,
+  fontWeight: 900,
+  color: "#0f172a",
+};
+
+const brandSubtitle: React.CSSProperties = {
+  marginTop: 8,
+  color: "#475569",
+  fontSize: 15,
+  lineHeight: 1.65,
+  maxWidth: 720,
+};
+
+const brandPillRow: React.CSSProperties = {
+  display: "flex",
+  gap: 10,
+  flexWrap: "wrap",
+  alignItems: "center",
+};
+
+const brandPill: React.CSSProperties = {
+  borderRadius: 999,
+  padding: "8px 12px",
+  border: "1px solid #dbe2ea",
+  background: "#fff",
+  color: "#334155",
+  fontSize: 12,
+  fontWeight: 800,
+};
+
+const headerMetricsGrid: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
+  gap: 12,
+};
+
+const metricCard: React.CSSProperties = {
+  border: "1px solid #dbeafe",
+  borderRadius: 18,
+  background: "linear-gradient(180deg, #ffffff 0%, #f8fbff 100%)",
+  padding: 16,
+  display: "grid",
+  gap: 6,
+  minHeight: 120,
+};
+
+const metricLabel: React.CSSProperties = {
+  fontSize: 11,
+  fontWeight: 800,
+  color: "#64748b",
+  letterSpacing: 0.08,
+  textTransform: "uppercase",
+};
+
+const metricValue: React.CSSProperties = {
+  fontSize: 28,
+  fontWeight: 900,
+  color: "#0f172a",
+};
+
+const metricValueWide: React.CSSProperties = {
+  fontSize: 18,
+  fontWeight: 800,
+  color: "#0f172a",
+  lineHeight: 1.4,
+  wordBreak: "break-word",
+};
+
+const metricHint: React.CSSProperties = {
+  fontSize: 12,
+  color: "#64748b",
+  lineHeight: 1.5,
+};
+
 const heroGrid: React.CSSProperties = {
   display: "grid",
   gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
@@ -1159,10 +1365,11 @@ const heroCard: React.CSSProperties = {
   borderRadius: 18,
   padding: 24,
   color: "white",
-  minHeight: 280,
+  minHeight: 0,
   display: "flex",
   flexDirection: "column",
   justifyContent: "space-between",
+  gap: 18,
 };
 
 const heroEyebrow: React.CSSProperties = {
@@ -1187,6 +1394,56 @@ const heroDescriptionStyle: React.CSSProperties = {
   fontSize: 15,
   lineHeight: 1.7,
   color: "rgba(255,255,255,0.86)",
+};
+
+const heroBrandBlock: React.CSSProperties = {
+  border: "1px solid rgba(255,255,255,0.18)",
+  borderRadius: 18,
+  background: "rgba(255,255,255,0.08)",
+  padding: 16,
+  display: "grid",
+  gap: 6,
+};
+
+const heroBrandName: React.CSSProperties = {
+  fontSize: 22,
+  fontWeight: 900,
+};
+
+const heroBrandText: React.CSSProperties = {
+  color: "rgba(255,255,255,0.86)",
+  fontSize: 13,
+  lineHeight: 1.6,
+};
+
+const heroMiniGrid: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+  gap: 10,
+};
+
+const heroMiniCard: React.CSSProperties = {
+  borderRadius: 16,
+  padding: 14,
+  background: "rgba(255,255,255,0.12)",
+  border: "1px solid rgba(255,255,255,0.14)",
+  display: "grid",
+  gap: 6,
+};
+
+const heroMiniLabel: React.CSSProperties = {
+  fontSize: 11,
+  fontWeight: 800,
+  letterSpacing: 0.08,
+  textTransform: "uppercase",
+  color: "rgba(255,255,255,0.72)",
+};
+
+const heroMiniValue: React.CSSProperties = {
+  fontSize: 14,
+  fontWeight: 800,
+  color: "#fff",
+  lineHeight: 1.5,
 };
 
 const heroPillRow: React.CSSProperties = {
@@ -1239,7 +1496,7 @@ const currencyRow: React.CSSProperties = {
 
 const contentGrid: React.CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "minmax(0, 1.6fr) minmax(320px, 0.9fr)",
+  gridTemplateColumns: "minmax(0, 1.9fr) minmax(320px, 0.85fr)",
   gap: 16,
   alignItems: "start",
 };
@@ -1274,8 +1531,8 @@ const filterRow: React.CSSProperties = {
 
 const productGrid: React.CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
-  gap: 14,
+  gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))",
+  gap: 16,
 };
 
 const productCard: React.CSSProperties = {
@@ -1472,6 +1729,15 @@ const sideTitle: React.CSSProperties = {
   fontWeight: 900,
   color: "#0f172a",
   marginBottom: 10,
+};
+
+const checkoutHint: React.CSSProperties = {
+  borderRadius: 999,
+  padding: "8px 12px",
+  background: "#eff6ff",
+  color: "#1d4ed8",
+  fontSize: 12,
+  fontWeight: 800,
 };
 
 const cartRow: React.CSSProperties = {
