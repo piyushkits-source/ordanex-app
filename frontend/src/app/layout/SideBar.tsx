@@ -41,11 +41,14 @@ export default function Sidebar() {
             ? buildStorefrontPath(scope.clientId || auth?.client_id, scope.environment || auth?.environment) || item.path
             : item.path;
         const active = location.pathname.startsWith(item.path);
+        const isStorefrontLink = item.path === "/portal";
 
         return (
           <NavLink
             key={item.label}
             to={resolvedPath}
+            target={isStorefrontLink ? "_blank" : undefined}
+            rel={isStorefrontLink ? "noreferrer" : undefined}
             style={{
               ...itemStyle,
               background: active ? "#eff6ff" : "#fff",

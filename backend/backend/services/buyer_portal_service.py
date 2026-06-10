@@ -314,7 +314,106 @@ class BuyerPortalService:
             "approved_buyers": approved_buyers,
         }
 
-    def _settings_row(self, db: Session, client_id: str):
+    def _settings_keys(self, environment: str | None) -> list[str]:
+        env = self._normalize_environment(environment)
+        return [f"SETTINGS_{env}", "SETTINGS"]
+
+    def _access_keys(self, environment: str | None) -> list[str]:
+        env = self._normalize_environment(environment).lower()
+        return [
+            f"buyer_storefront_{env}",
+            f"buyer-storefront-{env}",
+            f"buyerstorefront_{env}",
+            "buyer_storefront",
+            "buyer-storefront",
+            "buyerstorefront",
+        ]
+
+    def _pick_config_row(self, rows: list[models.ClientConfig], keys: list[str]) -> models.ClientConfig | None:
+        normalized_rows = {
+            str(getattr(row, "config_key", "") or "").strip().lower(): row
+            for row in rows
+        }
+        for key in keys:
+            row = normalized_rows.get(key.strip().lower())
+            if row is not None:
+                return row
+        return None
+
+    def _settings_row(self, db: Session, client_id: str, environment: str | None = None):
+        rows = (
+            db.query(models.ClientConfig)
+            .filter(models.ClientConfig.client_id == client_id)
+            .filter(models.ClientConfig.config_type == "BUYER_PORTAL")
+            .filter(models.ClientConfig.is_active.is_(True))
+            .order_by(models.ClientConfig.created_at.desc())
+            .all()
+        )
+        return self._pick_config_row(rows, self._settings_keys(environment))
+
+    def _ensure_settings_row(self, db: Session, client_id: str, environment: str | None = None):
+        row = self._settings_row(db, client_id, environment)
+        expected_key = self._settings_keys(environment)[0]
+        if row and str(getattr(row, "config_key", "") or "").strip().upper() == expected_key:
+            return row
+        row = models.ClientConfig(
+            client_id=client_id,
+            config_type="BUYER_PORTAL",
+            config_key=expected_key,
+            config_value_json={},
+            is_active=True,
+        )
+        db.add(row)
+        return row
+
+    def _access_row(self, db: Session, client_id: str, environment: str | None = None):
+        rows = (
+            db.query(models.ClientConfig)
+            .filter(models.ClientConfig.client_id == client_id)
+            .filter(models.ClientConfig.is_active.is_(True))
+            .filter(models.ClientConfig.config_type.in_(["FEATURES", "FEATURE_FLAG", "BUYER_PORTAL"]))
+            .order_by(models.ClientConfig.updated_at.desc(), models.ClientConfig.created_at.desc())
+            .all()
+        )
+        return self._pick_config_row(rows, self._access_keys(environment))
+
+    def _ensure_access_row(self, db: Session, client_id: str, environment: str | None = None):
+        row = self._access_row(db, client_id, environment)
+        expected_key = self._access_keys(environment)[0]
+        if row and str(getattr(row, "config_key", "") or "").strip().lower() == expected_key:
+            return row
+        row = models.ClientConfig(
+            client_id=client_id,
+            config_type="BUYER_PORTAL",
+            config_key=expected_key,
+            config_value_json={},
+            is_active=True,
+        )
+        db.add(row)
+        return row
+
+    def _is_storefront_explicitly_enabled(self, row: models.ClientConfig | None) -> bool | None:
+        if not row or not isinstance(row.config_value_json, dict):
+            return None
+        config = row.config_value_json
+        if "enabled" in config:
+            return bool(config.get("enabled"))
+        if "disabled" in config:
+            return not bool(config.get("disabled"))
+        return None
+
+    def _storefront_access_enabled(self, db: Session, client_id: str, environment: str | None = None) -> tuple[dict[str, Any], bool, bool | None]:
+        entitlements = get_client_entitlements(db, client_id)
+        access_row = self._access_row(db, client_id, environment)
+        explicit_enabled = self._is_storefront_explicitly_enabled(access_row)
+        entitled = bool(entitlements.get("buyer_storefront"))
+        effective_enabled = entitled if explicit_enabled is None else (entitled and explicit_enabled)
+        return entitlements, effective_enabled, explicit_enabled
+
+    def _settings_environment_payload(self, environment: str | None) -> dict[str, Any]:
+        return {"environment": self._normalize_environment(environment)}
+
+    def _settings_row_legacy(self, db: Session, client_id: str):
         return (
             db.query(models.ClientConfig)
             .filter(models.ClientConfig.client_id == client_id)
@@ -411,8 +510,8 @@ class BuyerPortalService:
         return merged
 
     def get_settings(self, db: Session, client_id: str, environment: str | None = None) -> dict[str, Any]:
-        self.assert_access(db, client_id)
-        row = self._settings_row(db, client_id)
+        self.assert_access(db, client_id, environment)
+        row = self._settings_row(db, client_id, environment)
         payload = self._settings_payload(row)
         environment_code = self._normalize_environment(environment)
         payload["commerce"]["supplier_display_name"] = (
@@ -426,18 +525,15 @@ class BuyerPortalService:
             **payload,
         }
 
-    def save_settings(self, db: Session, client_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-        self.assert_access(db, client_id)
-        row = self._settings_row(db, client_id)
-        if row is None:
-            row = models.ClientConfig(
-                client_id=client_id,
-                config_type="BUYER_PORTAL",
-                config_key="SETTINGS",
-                config_value_json={},
-                is_active=True,
-            )
-            db.add(row)
+    def save_settings(
+        self,
+        db: Session,
+        client_id: str,
+        payload: dict[str, Any],
+        environment: str | None = None,
+    ) -> dict[str, Any]:
+        self.assert_access(db, client_id, environment)
+        row = self._ensure_settings_row(db, client_id, environment)
         current = self._settings_payload(row)
         branding = payload.get("branding") if isinstance(payload.get("branding"), dict) else {}
         catalog = payload.get("catalog") if isinstance(payload.get("catalog"), dict) else {}
@@ -492,6 +588,7 @@ class BuyerPortalService:
         db.refresh(row)
         return {
             "client_id": client_id,
+            "environment": self._normalize_environment(environment),
             **self._settings_payload(row),
         }
 
@@ -502,8 +599,12 @@ class BuyerPortalService:
         buyer_email: str | None = None,
         environment: str | None = None,
     ) -> dict[str, Any]:
-        entitlements = get_client_entitlements(db, client_id)
-        settings_row = self._settings_row(db, client_id)
+        entitlements, buyer_storefront_enabled, explicit_enabled = self._storefront_access_enabled(
+            db,
+            client_id,
+            environment,
+        )
+        settings_row = self._settings_row(db, client_id, environment)
         settings = self._settings_payload(settings_row)
         environment_code = self._normalize_environment(environment)
         approved_buyers = settings.get("access", {}).get("approved_buyers", [])
@@ -517,24 +618,30 @@ class BuyerPortalService:
                     approved_record = record
                     break
         approval_required = True
+        if not buyer_storefront_enabled:
+            access_message = "Buyer storefront is not enabled for this environment."
+        elif approval_required and not normalized_email:
+            access_message = "Approved buyer email required."
+        elif approval_required and not approved:
+            access_message = "Email not approved for this storefront."
+        else:
+            access_message = "Access approved."
         return {
             "client_id": client_id,
             "environment": environment_code,
             **entitlements,
+            "buyer_storefront": buyer_storefront_enabled,
+            "explicit_enabled": explicit_enabled,
             "buyer_email": normalized_email or None,
             "buyer_approved": approved,
             "approval_required": approval_required,
-            "access_message": (
-                "Approved buyer email required."
-                if approval_required and not normalized_email
-                else ("Email not approved for this storefront." if approval_required and not approved else "Access approved.")
-            ),
+            "access_message": access_message,
             "approved_buyer_count": len(approved_buyers),
             "approved_buyer": approved_record,
         }
 
-    def assert_access(self, db: Session, client_id: str) -> dict[str, Any]:
-        access_state = self.get_access_state(db, client_id)
+    def assert_access(self, db: Session, client_id: str, environment: str | None = None) -> dict[str, Any]:
+        access_state = self.get_access_state(db, client_id, environment=environment)
         if not access_state.get("buyer_storefront"):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -547,9 +654,15 @@ class BuyerPortalService:
             )
         return access_state
 
-    def assert_buyer_authorized(self, db: Session, client_id: str, buyer_email: str | None) -> dict[str, Any]:
+    def assert_buyer_authorized(
+        self,
+        db: Session,
+        client_id: str,
+        buyer_email: str | None,
+        environment: str | None = None,
+    ) -> dict[str, Any]:
         normalized_email = self._normalize_email(buyer_email)
-        access_state = self.get_access_state(db, client_id, normalized_email or None)
+        access_state = self.get_access_state(db, client_id, normalized_email or None, environment)
         if not access_state.get("buyer_storefront"):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -590,7 +703,7 @@ class BuyerPortalService:
                 return [item for item in items if isinstance(item, dict)]
         return []
 
-    def _protected_media_url(self, raw_url: Any, client_id: str, buyer_email: str) -> str | None:
+    def _protected_media_url(self, raw_url: Any, client_id: str, buyer_email: str, environment: str | None = None) -> str | None:
         text = str(raw_url or "").strip()
         if not text:
             return None
@@ -600,12 +713,19 @@ class BuyerPortalService:
         file_id = match.group(1)
         encoded_client = quote(client_id, safe="")
         encoded_email = quote(buyer_email, safe="")
-        return f"/buyer-portal/media/{file_id}?client_id={encoded_client}&buyer_email={encoded_email}"
+        encoded_environment = quote(self._normalize_environment(environment), safe="")
+        return f"/buyer-portal/media/{file_id}?client_id={encoded_client}&buyer_email={encoded_email}&environment={encoded_environment}"
 
-    def _protect_catalog_media(self, item: dict[str, Any], client_id: str, buyer_email: str) -> dict[str, Any]:
+    def _protect_catalog_media(
+        self,
+        item: dict[str, Any],
+        client_id: str,
+        buyer_email: str,
+        environment: str | None = None,
+    ) -> dict[str, Any]:
         protected = dict(item)
-        protected_image = self._protected_media_url(protected.get("image_url"), client_id, buyer_email)
-        protected_video = self._protected_media_url(protected.get("video_url"), client_id, buyer_email)
+        protected_image = self._protected_media_url(protected.get("image_url"), client_id, buyer_email, environment)
+        protected_video = self._protected_media_url(protected.get("video_url"), client_id, buyer_email, environment)
         if protected_image:
             protected["image_url"] = protected_image
         if protected_video:
@@ -618,8 +738,8 @@ class BuyerPortalService:
                 if not isinstance(entry, dict):
                     continue
                 next_entry = dict(entry)
-                protected_url = self._protected_media_url(next_entry.get("url"), client_id, buyer_email)
-                protected_poster = self._protected_media_url(next_entry.get("poster_url"), client_id, buyer_email)
+                protected_url = self._protected_media_url(next_entry.get("url"), client_id, buyer_email, environment)
+                protected_poster = self._protected_media_url(next_entry.get("poster_url"), client_id, buyer_email, environment)
                 if protected_url:
                     next_entry["url"] = protected_url
                 if protected_poster:
@@ -636,10 +756,10 @@ class BuyerPortalService:
         buyer_email: str | None = None,
         environment: str | None = None,
     ) -> list[dict[str, Any]]:
-        access_state = self.assert_buyer_authorized(db, client_id, buyer_email)
+        access_state = self.assert_buyer_authorized(db, client_id, buyer_email, environment)
         approved_email = str(access_state.get("buyer_email") or buyer_email or "").strip().lower()
         supplier_name = self._client_name(db, client_id) or "Configured Supplier"
-        settings_row = self._settings_row(db, client_id)
+        settings_row = self._settings_row(db, client_id, environment)
         if settings_row:
             settings = self._settings_payload(settings_row)
             catalog = self._normalize_catalog(settings.get("catalog"))
@@ -649,6 +769,7 @@ class BuyerPortalService:
                         {**item, "supplier_name": supplier_name},
                         client_id,
                         approved_email,
+                        environment,
                     )
                     for item in catalog
                 ]
@@ -658,6 +779,7 @@ class BuyerPortalService:
                         {**item, "supplier_name": supplier_name},
                         client_id,
                         approved_email,
+                        environment,
                     )
                     for item in DEFAULT_CATALOG
                 ]
@@ -678,6 +800,7 @@ class BuyerPortalService:
                     {**item, "supplier_name": supplier_name},
                     client_id,
                     approved_email,
+                    environment,
                 )
                 for item in DEFAULT_CATALOG
             ]
@@ -690,12 +813,20 @@ class BuyerPortalService:
                 {**item, "supplier_name": supplier_name},
                 client_id,
                 approved_email,
+                environment,
             )
             for item in final_catalog
         ]
 
-    def get_catalog_media(self, db: Session, file_id: Any, client_id: str, buyer_email: str) -> Response:
-        self.assert_buyer_authorized(db, client_id, buyer_email)
+    def get_catalog_media(
+        self,
+        db: Session,
+        file_id: Any,
+        client_id: str,
+        buyer_email: str,
+        environment: str | None = None,
+    ) -> Response:
+        self.assert_buyer_authorized(db, client_id, buyer_email, environment)
         file_row = (
             db.query(models.FileStore)
             .filter(models.FileStore.file_id == file_id)
@@ -967,8 +1098,8 @@ class BuyerPortalService:
         db: Session,
         payload: schemas.BuyerPortalOrderCreate,
     ) -> BuyerPortalResult:
-        self.assert_buyer_authorized(db, payload.client_id, payload.buyer_email)
-        settings = self._settings_payload(self._settings_row(db, payload.client_id))
+        self.assert_buyer_authorized(db, payload.client_id, payload.buyer_email, payload.environment)
+        settings = self._settings_payload(self._settings_row(db, payload.client_id, payload.environment))
         commerce = settings.get("commerce") if isinstance(settings.get("commerce"), dict) else {}
         payments = settings.get("payments") if isinstance(settings.get("payments"), dict) else {}
         client = db.query(models.Client).filter(models.Client.client_id == payload.client_id).first()
@@ -1158,9 +1289,9 @@ class BuyerPortalService:
         buyer_email: str | None = None,
         environment: str | None = None,
     ):
-        self.assert_access(db, client_id)
+        self.assert_access(db, client_id, environment)
         if buyer_email:
-            self.assert_buyer_authorized(db, client_id, buyer_email)
+            self.assert_buyer_authorized(db, client_id, buyer_email, environment)
         environment_code = self._normalize_environment(environment)
         query = (
             db.query(models.PurchaseOrder)
@@ -1238,6 +1369,45 @@ class BuyerPortalService:
             po.review_status = "BUYER_PORTAL_INVOICE_SHARED"
         po.header_details = json.dumps(meta, ensure_ascii=False)
         db.add(po)
+        if invoice_payload is not None:
+            db.add(
+                models.PoLog(
+                    po_id=po.po_id,
+                    client_id=po.client_id,
+                    level="INFO",
+                    stage="BUYER_PORTAL_INVOICE_UPDATED",
+                    message=f"Invoice details updated in buyer portal flow: {invoice_payload.get('invoice_number') or 'Invoice shared'}.",
+                    created_by="system",
+                )
+            )
+        if shipment_payload is not None:
+            db.add(
+                models.PoLog(
+                    po_id=po.po_id,
+                    client_id=po.client_id,
+                    level="INFO",
+                    stage="BUYER_PORTAL_SHIPMENT_UPDATED",
+                    message=(
+                        "Shipment details updated in buyer portal flow: "
+                        f"{shipment_payload.get('shipment_status') or shipment_payload.get('shipment_number') or 'Shipment updated'}."
+                    ),
+                    created_by="system",
+                )
+            )
+        if payment_payload is not None:
+            db.add(
+                models.PoLog(
+                    po_id=po.po_id,
+                    client_id=po.client_id,
+                    level="INFO",
+                    stage="BUYER_PORTAL_PAYMENT_UPDATED",
+                    message=(
+                        "Payment details updated in buyer portal flow: "
+                        f"{payment_payload.get('payment_status') or payment_payload.get('payment_reference') or 'Payment updated'}."
+                    ),
+                    created_by="system",
+                )
+            )
         db.commit()
         db.refresh(po)
         self._send_buyer_update_email(

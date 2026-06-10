@@ -27,7 +27,7 @@ def get_monitoring_queue(
     direction: str = Query("ALL"),
     status_filter: str = Query("ALL"),
     client_id: str | None = Query(None),
-    po_id: str | None = Query(None),
+    po_id: UUID | None = Query(None),
     search: str | None = Query(None),
     fromDate: str | None = Query(None),
     toDate: str | None = Query(None),

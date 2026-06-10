@@ -99,6 +99,13 @@ def get_protected_media(
     file_id: UUID,
     client_id: str = Query(...),
     buyer_email: str = Query(...),
+    environment: str | None = Query(default=None),
     db: Session = Depends(get_db),
 ):
-    return buyer_portal_service.get_catalog_media(db, file_id, client_id, buyer_email)
+    return buyer_portal_service.get_catalog_media(
+        db,
+        file_id,
+        client_id,
+        buyer_email,
+        environment=environment,
+    )

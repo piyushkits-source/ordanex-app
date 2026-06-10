@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
 from datetime import datetime
 from io import BytesIO
@@ -692,178 +692,179 @@ def upsert_client_profile_details(
     }
 
 
-def _buyer_storefront_config_row(db: Session, client_id: str):
-    return (
+def _normalize_storefront_environment(value: str | None) -> str:
+    normalized = str(value or "").strip().upper()
+    if normalized in {"STAGING", "STAGE", "STG"}:
+        return "STAGING"
+    return "PROD"
+
+
+def _buyer_storefront_access_keys(environment: str | None) -> list[str]:
+    env = _normalize_storefront_environment(environment).lower()
+    return [
+        f"buyer_storefront_{env}",
+        f"buyer-storefront-{env}",
+        f"buyerstorefront_{env}",
+        "buyer_storefront",
+        "buyer-storefront",
+        "buyerstorefront",
+    ]
+
+
+def _buyer_storefront_settings_keys(environment: str | None) -> list[str]:
+    env = _normalize_storefront_environment(environment)
+    return [f"SETTINGS_{env}", "SETTINGS"]
+
+
+def _pick_config_row(rows: list[models.ClientConfig], keys: list[str]):
+    row_map = {
+        str(getattr(row, "config_key", "") or "").strip().lower(): row
+        for row in rows
+    }
+    for key in keys:
+        row = row_map.get(key.strip().lower())
+        if row is not None:
+            return row
+    return None
+
+
+def _buyer_storefront_access_row(db: Session, client_id: str, environment: str | None = None):
+    rows = (
         db.query(models.ClientConfig)
         .filter(models.ClientConfig.client_id == client_id)
         .filter(models.ClientConfig.is_active.is_(True))
         .filter(models.ClientConfig.config_type.in_(["FEATURES", "FEATURE_FLAG", "BUYER_PORTAL"]))
-        .filter(models.ClientConfig.config_key.in_(["buyer_storefront", "buyer-storefront", "buyerstorefront"]))
         .order_by(models.ClientConfig.updated_at.desc(), models.ClientConfig.created_at.desc())
-        .first()
+        .all()
     )
+    return _pick_config_row(rows, _buyer_storefront_access_keys(environment))
 
 
-@router.get("/buyer-storefront/{client_id}")
-def get_buyer_storefront_access(client_id: str, db: Session = Depends(get_db)):
-    row = _buyer_storefront_config_row(db, client_id)
-    entitlements = get_client_entitlements(db, client_id)
-    config = row.config_value_json or {} if row else {}
-    explicit_enabled = None
-    if row and isinstance(config, dict):
-        if "enabled" in config:
-            explicit_enabled = bool(config.get("enabled"))
-        elif "disabled" in config:
-            explicit_enabled = not bool(config.get("disabled"))
-
-    return {
-        "client_id": client_id,
-        "subscription_type": entitlements.get("subscription_type"),
-        "enabled": bool(entitlements.get("buyer_storefront")),
-        "source": entitlements.get("buyer_storefront_source"),
-        "explicit_enabled": explicit_enabled,
-        "config": config if isinstance(config, dict) else {},
-    }
-
-
-@router.put("/buyer-storefront/{client_id}")
-def update_buyer_storefront_access(
-    client_id: str,
-    payload: dict[str, Any],
-    db: Session = Depends(get_db),
-):
-    if "enabled" not in payload:
-        raise HTTPException(status_code=400, detail="'enabled' is required")
-
-    enabled = bool(payload.get("enabled"))
-    row = _buyer_storefront_config_row(db, client_id)
-    if row is None:
-        row = models.ClientConfig(
-            client_id=client_id,
-            config_type="BUYER_PORTAL",
-            config_key="buyer_storefront",
-            config_value_json={},
-        )
-        db.add(row)
-
-    config = dict(row.config_value_json or {})
-    config["enabled"] = enabled
-    config["disabled"] = not enabled
-    config["updated_at"] = datetime.utcnow().isoformat()
-    if payload.get("note"):
-        config["note"] = str(payload.get("note"))
-    row.config_value_json = config
-    row.is_active = True
-    db.commit()
-    db.refresh(row)
-
-    entitlements = get_client_entitlements(db, client_id)
-    return {
-        "client_id": client_id,
-        "subscription_type": entitlements.get("subscription_type"),
-        "enabled": bool(entitlements.get("buyer_storefront")),
-        "source": entitlements.get("buyer_storefront_source"),
-        "explicit_enabled": enabled,
-        "config": row.config_value_json or {},
-    }
-
-
-
-def _buyer_storefront_config_row(db: Session, client_id: str):
-    return (
-        db.query(models.ClientConfig)
-        .filter(models.ClientConfig.client_id == client_id)
-        .filter(models.ClientConfig.is_active.is_(True))
-        .filter(models.ClientConfig.config_type.in_(["FEATURES", "FEATURE_FLAG", "BUYER_PORTAL"]))
-        .filter(models.ClientConfig.config_key.in_(["buyer_storefront", "buyer-storefront", "buyerstorefront"]))
-        .order_by(models.ClientConfig.updated_at.desc(), models.ClientConfig.created_at.desc())
-        .first()
+def _ensure_buyer_storefront_access_row(db: Session, client_id: str, environment: str | None = None):
+    row = _buyer_storefront_access_row(db, client_id, environment)
+    expected_key = _buyer_storefront_access_keys(environment)[0]
+    if row and str(getattr(row, "config_key", "") or "").strip().lower() == expected_key:
+        return row
+    row = models.ClientConfig(
+        client_id=client_id,
+        config_type="BUYER_PORTAL",
+        config_key=expected_key,
+        config_value_json={},
+        is_active=True,
     )
+    db.add(row)
+    return row
 
 
-@router.get("/buyer-storefront/{client_id}")
-def get_buyer_storefront_access(client_id: str, db: Session = Depends(get_db)):
-    row = _buyer_storefront_config_row(db, client_id)
-    entitlements = get_client_entitlements(db, client_id)
-    config = row.config_value_json or {} if row else {}
-    explicit_enabled = None
-    if row and isinstance(config, dict):
-        if "enabled" in config:
-            explicit_enabled = bool(config.get("enabled"))
-        elif "disabled" in config:
-            explicit_enabled = not bool(config.get("disabled"))
-
-    return {
-        "client_id": client_id,
-        "subscription_type": entitlements.get("subscription_type"),
-        "enabled": bool(entitlements.get("buyer_storefront")),
-        "source": entitlements.get("buyer_storefront_source"),
-        "explicit_enabled": explicit_enabled,
-        "config": config if isinstance(config, dict) else {},
-    }
-
-
-@router.put("/buyer-storefront/{client_id}")
-def update_buyer_storefront_access(
-    client_id: str,
-    payload: dict[str, Any],
-    db: Session = Depends(get_db),
-):
-    if "enabled" not in payload:
-        raise HTTPException(status_code=400, detail="'enabled' is required")
-
-    enabled = bool(payload.get("enabled"))
-    row = _buyer_storefront_config_row(db, client_id)
-    if row is None:
-        row = models.ClientConfig(
-            client_id=client_id,
-            config_type="BUYER_PORTAL",
-            config_key="buyer_storefront",
-            config_value_json={},
-        )
-        db.add(row)
-
-    config = dict(row.config_value_json or {})
-    config["enabled"] = enabled
-    config["disabled"] = not enabled
-    config["updated_at"] = datetime.utcnow().isoformat()
-    if payload.get("note"):
-        config["note"] = str(payload.get("note"))
-    row.config_value_json = config
-    row.is_active = True
-    db.commit()
-    db.refresh(row)
-
-    entitlements = get_client_entitlements(db, client_id)
-    return {
-        "client_id": client_id,
-        "subscription_type": entitlements.get("subscription_type"),
-        "enabled": bool(entitlements.get("buyer_storefront")),
-        "source": entitlements.get("buyer_storefront_source"),
-        "explicit_enabled": enabled,
-        "config": row.config_value_json or {},
-    }
-
-
-
-def _buyer_storefront_settings_row(db: Session, client_id: str):
-    return (
+def _buyer_storefront_settings_row(db: Session, client_id: str, environment: str | None = None):
+    rows = (
         db.query(models.ClientConfig)
         .filter(models.ClientConfig.client_id == client_id)
         .filter(models.ClientConfig.is_active.is_(True))
         .filter(models.ClientConfig.config_type == "BUYER_PORTAL")
-        .filter(models.ClientConfig.config_key == "SETTINGS")
         .order_by(models.ClientConfig.updated_at.desc(), models.ClientConfig.created_at.desc())
-        .first()
+        .all()
     )
+    return _pick_config_row(rows, _buyer_storefront_settings_keys(environment))
+
+
+def _ensure_buyer_storefront_settings_row(db: Session, client_id: str, environment: str | None = None):
+    row = _buyer_storefront_settings_row(db, client_id, environment)
+    expected_key = _buyer_storefront_settings_keys(environment)[0]
+    if row and str(getattr(row, "config_key", "") or "").strip().upper() == expected_key:
+        return row
+    row = models.ClientConfig(
+        client_id=client_id,
+        config_type="BUYER_PORTAL",
+        config_key=expected_key,
+        config_value_json={},
+        is_active=True,
+    )
+    db.add(row)
+    return row
+
+
+def _storefront_explicit_enabled(row: models.ClientConfig | None) -> bool | None:
+    config = row.config_value_json if row and isinstance(row.config_value_json, dict) else {}
+    if "enabled" in config:
+        return bool(config.get("enabled"))
+    if "disabled" in config:
+        return not bool(config.get("disabled"))
+    return None
+
+
+@router.get("/buyer-storefront/{client_id}")
+def get_buyer_storefront_access(
+    client_id: str,
+    environment: str | None = Query(None),
+    db: Session = Depends(get_db),
+):
+    row = _buyer_storefront_access_row(db, client_id, environment)
+    entitlements = get_client_entitlements(db, client_id)
+    config = row.config_value_json if row and isinstance(row.config_value_json, dict) else {}
+    explicit_enabled = _storefront_explicit_enabled(row)
+    entitled = bool(entitlements.get("buyer_storefront"))
+    enabled = entitled if explicit_enabled is None else (entitled and explicit_enabled)
+
+    return {
+        "client_id": client_id,
+        "environment": _normalize_storefront_environment(environment),
+        "subscription_type": entitlements.get("subscription_type"),
+        "enabled": enabled,
+        "source": entitlements.get("buyer_storefront_source"),
+        "explicit_enabled": explicit_enabled,
+        "config": config,
+    }
+
+
+@router.put("/buyer-storefront/{client_id}")
+def update_buyer_storefront_access(
+    client_id: str,
+    payload: dict[str, Any],
+    environment: str | None = Query(None),
+    db: Session = Depends(get_db),
+):
+    if "enabled" not in payload:
+        raise HTTPException(status_code=400, detail="'enabled' is required")
+
+    enabled = bool(payload.get("enabled"))
+    row = _ensure_buyer_storefront_access_row(db, client_id, environment)
+
+    config = dict(row.config_value_json or {})
+    config["enabled"] = enabled
+    config["disabled"] = not enabled
+    config["updated_at"] = datetime.utcnow().isoformat()
+    if payload.get("note"):
+        config["note"] = str(payload.get("note"))
+    row.config_value_json = config
+    row.is_active = True
+    db.commit()
+    db.refresh(row)
+
+    entitlements = get_client_entitlements(db, client_id)
+    entitled = bool(entitlements.get("buyer_storefront"))
+    return {
+        "client_id": client_id,
+        "environment": _normalize_storefront_environment(environment),
+        "subscription_type": entitlements.get("subscription_type"),
+        "enabled": entitled and enabled,
+        "source": entitlements.get("buyer_storefront_source"),
+        "explicit_enabled": enabled,
+        "config": row.config_value_json or {},
+    }
 
 
 @router.get("/buyer-storefront-settings/{client_id}")
-def get_buyer_storefront_settings(client_id: str, db: Session = Depends(get_db)):
-    row = _buyer_storefront_settings_row(db, client_id)
+def get_buyer_storefront_settings(
+    client_id: str,
+    environment: str | None = Query(None),
+    db: Session = Depends(get_db),
+):
+    row = _buyer_storefront_settings_row(db, client_id, environment)
     settings = row.config_value_json if row and isinstance(row.config_value_json, dict) else {}
     return {
         "client_id": client_id,
+        "environment": _normalize_storefront_environment(environment),
         "settings": settings,
     }
 
@@ -872,18 +873,10 @@ def get_buyer_storefront_settings(client_id: str, db: Session = Depends(get_db))
 def update_buyer_storefront_settings(
     client_id: str,
     payload: dict[str, Any],
+    environment: str | None = Query(None),
     db: Session = Depends(get_db),
 ):
-    row = _buyer_storefront_settings_row(db, client_id)
-    if row is None:
-        row = models.ClientConfig(
-            client_id=client_id,
-            config_type="BUYER_PORTAL",
-            config_key="SETTINGS",
-            config_value_json={},
-            is_active=True,
-        )
-        db.add(row)
+    row = _ensure_buyer_storefront_settings_row(db, client_id, environment)
 
     current = row.config_value_json if isinstance(row.config_value_json, dict) else {}
     branding = payload.get("branding") if isinstance(payload.get("branding"), dict) else {}
@@ -891,6 +884,7 @@ def update_buyer_storefront_settings(
     commerce = payload.get("commerce") if isinstance(payload.get("commerce"), dict) else {}
     payments = payload.get("payments") if isinstance(payload.get("payments"), dict) else {}
     experience = payload.get("experience") if isinstance(payload.get("experience"), dict) else {}
+    pricing = payload.get("pricing") if isinstance(payload.get("pricing"), dict) else {}
     access = payload.get("access") if isinstance(payload.get("access"), dict) else {}
     current = {
         **current,
@@ -899,6 +893,7 @@ def update_buyer_storefront_settings(
         "commerce": {**(current.get("commerce") if isinstance(current.get("commerce"), dict) else {}), **commerce},
         "payments": {**(current.get("payments") if isinstance(current.get("payments"), dict) else {}), **payments},
         "experience": {**(current.get("experience") if isinstance(current.get("experience"), dict) else {}), **experience},
+        "pricing": {**(current.get("pricing") if isinstance(current.get("pricing"), dict) else {}), **pricing},
     }
     if access:
         approved_buyers = access.get("approved_buyers") if isinstance(access.get("approved_buyers"), list) else []
@@ -927,7 +922,45 @@ def update_buyer_storefront_settings(
     db.refresh(row)
     return {
         "client_id": client_id,
+        "environment": _normalize_storefront_environment(environment),
         "settings": row.config_value_json if isinstance(row.config_value_json, dict) else {},
+    }
+
+
+@router.post("/buyer-storefront-settings/{client_id}/publish")
+def publish_buyer_storefront_settings(
+    client_id: str,
+    from_environment: str = Query("STAGING"),
+    to_environment: str = Query("PROD"),
+    db: Session = Depends(get_db),
+):
+    source_environment = _normalize_storefront_environment(from_environment)
+    target_environment = _normalize_storefront_environment(to_environment)
+    if source_environment == target_environment:
+        raise HTTPException(status_code=400, detail="Source and target storefront environments must be different.")
+
+    source_settings = _buyer_storefront_settings_row(db, client_id, source_environment)
+    if source_settings is None or not isinstance(source_settings.config_value_json, dict):
+        raise HTTPException(status_code=404, detail="No storefront settings found for the source environment.")
+
+    target_settings = _ensure_buyer_storefront_settings_row(db, client_id, target_environment)
+    target_settings.config_value_json = json.loads(json.dumps(source_settings.config_value_json))
+    target_settings.is_active = True
+
+    source_access = _buyer_storefront_access_row(db, client_id, source_environment)
+    if source_access is not None and isinstance(source_access.config_value_json, dict):
+        target_access = _ensure_buyer_storefront_access_row(db, client_id, target_environment)
+        target_access.config_value_json = json.loads(json.dumps(source_access.config_value_json))
+        target_access.is_active = True
+
+    db.commit()
+    db.refresh(target_settings)
+
+    return {
+        "client_id": client_id,
+        "source_environment": source_environment,
+        "target_environment": target_environment,
+        "settings": target_settings.config_value_json if isinstance(target_settings.config_value_json, dict) else {},
     }
 
 
@@ -995,8 +1028,12 @@ def _catalog_source_payloads(db: Session, client_id: str) -> list[dict[str, Any]
 
 
 @router.post("/buyer-storefront-catalog-sync/{client_id}")
-def sync_buyer_storefront_catalog(client_id: str, db: Session = Depends(get_db)):
-    row = _buyer_storefront_settings_row(db, client_id)
+def sync_buyer_storefront_catalog(
+    client_id: str,
+    environment: str | None = Query(None),
+    db: Session = Depends(get_db),
+):
+    row = _buyer_storefront_settings_row(db, client_id, environment)
     if row is None:
         raise HTTPException(status_code=404, detail="Buyer storefront settings not found.")
 
@@ -1061,6 +1098,7 @@ def sync_buyer_storefront_catalog(client_id: str, db: Session = Depends(get_db))
 
     return {
         "client_id": client_id,
+        "environment": _normalize_storefront_environment(environment),
         "records_synced": len(synced_items),
         "source_system": source_system,
         "settings": row.config_value_json if isinstance(row.config_value_json, dict) else {},
@@ -1378,4 +1416,3 @@ def download_storefront_catalog_template():
             "Content-Disposition": 'attachment; filename="ordanex-storefront-catalog-template.xlsx"'
         },
     )
-

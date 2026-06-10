@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useLocation } from "react-router-dom";
 import UserMenu from "../../components/common/UserMenu";
 import {
   buildStorefrontPath,
@@ -29,7 +29,6 @@ export default function TopBar() {
   const title = getPageTitle(location.pathname);
   const { scope } = useAppScope();
   const auth = getAuth();
-  const navigate = useNavigate();
   const [environment, setEnvironment] = useState(getFrontendEnvironmentLabel());
   const activeClientId = scope.clientId || auth?.client_id;
   const storefrontPath = canAccessModule(auth, "buyer_storefront")
@@ -92,7 +91,7 @@ export default function TopBar() {
         {storefrontPath ? (
           <button
             type="button"
-            onClick={() => navigate(storefrontPath)}
+            onClick={() => window.open(storefrontPath, "_blank", "noopener,noreferrer")}
             style={{
               border: "1px solid rgba(255,255,255,0.35)",
               background: "rgba(255,255,255,0.12)",

@@ -248,10 +248,10 @@ export default function MessageMonitorPage() {
   const counts: Counts = useMemo(() => {
     const total = sortedRows.length;
     const processed = sortedRows.filter((r) =>
-      ["PROCESSED", "SUCCESS"].includes((r.status || "").toUpperCase())
+      ["PROCESSED", "SUCCESS", "DELIVERED", "COMPLETED"].includes((r.status || "").toUpperCase())
     ).length;
     const pending = sortedRows.filter((r) =>
-      ["NEW", "PENDING", "ERROR", "FAILED", "CORRECTED"].includes(
+      ["NEW", "PENDING", "ERROR", "FAILED", "CORRECTED", "ORDER_RECEIVED", "PAYMENT_PENDING"].includes(
         (r.status || "").toUpperCase()
       )
     ).length;

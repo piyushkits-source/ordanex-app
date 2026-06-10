@@ -92,6 +92,8 @@ export default function UserMenu() {
             {storefrontPath ? (
               <Link
                 to={storefrontPath}
+                target="_blank"
+                rel="noreferrer"
                 onClick={() => setOpen(false)}
                 style={{
                   ...menuItemStyle,

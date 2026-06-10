@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from typing import Any
+from uuid import UUID
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import or_
 import csv
@@ -141,13 +142,13 @@ class MonitoringService:
     def _status_group(self, status: str | None) -> str:
         s = (status or "").strip().upper()
 
-        if s in {"NEW", "PENDING", "ERROR", "FAILED", "CORRECTED"}:
+        if s in {"NEW", "PENDING", "ERROR", "FAILED", "CORRECTED", "ORDER_RECEIVED", "PAYMENT_PENDING"}:
             return "PENDING"
 
-        if s in {"PROCESSING", "REPROCESSING", "TRANSFORMED"}:
+        if s in {"PROCESSING", "REPROCESSING", "TRANSFORMED", "PAYMENT_RECEIVED", "INVOICED", "SHIPPED"}:
             return "IN_PROGRESS"
 
-        if s in {"PROCESSED", "SUCCESS"}:
+        if s in {"PROCESSED", "SUCCESS", "DELIVERED", "COMPLETED"}:
             return "SUCCESSFUL"
 
         if s in {"ARCHIVED"}:
@@ -163,7 +164,7 @@ class MonitoringService:
         direction: str | None = None,
         status_filter: str | None = None,
         client_id: str | None = None,
-        po_id: str | None = None,
+        po_id: UUID | None = None,
         search: str | None = None,
         from_date: str | None = None,
         to_date: str | None = None,

@@ -370,8 +370,14 @@ export default function ClientStorefrontSection({ client, onBanner }: Props) {
   const { scope } = useAppScope();
   const activeEnvironment = scope.environment || "PROD";
   const activeEnvironmentLabel = workspaceEnvironmentBadge(activeEnvironment);
+  const isProductionWorkspace = activeEnvironment === "PROD";
+  const storefrontQuery = useMemo(
+    () => `environment=${encodeURIComponent(activeEnvironment)}`,
+    [activeEnvironment],
+  );
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [publishing, setPublishing] = useState(false);
   const [catalogImporting, setCatalogImporting] = useState(false);
   const [mediaUploading, setMediaUploading] = useState(false);
   const [mediaUploadNote, setMediaUploadNote] = useState<{ type: "success" | "error" | "info"; text: string } | null>(null);
@@ -441,7 +447,7 @@ export default function ClientStorefrontSection({ client, onBanner }: Props) {
   useEffect(() => {
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [client?.client_id]);
+  }, [activeEnvironment, client?.client_id]);
 
   useEffect(() => {
     if (!catalogItems.length) {
@@ -458,8 +464,8 @@ export default function ClientStorefrontSection({ client, onBanner }: Props) {
     try {
       setLoading(true);
       const [accessRes, settingsRes] = await Promise.all([
-        apiFetch(`${API}/buyer-storefront/${client.client_id}`),
-        apiFetch(`${API}/buyer-storefront-settings/${client.client_id}`),
+        apiFetch(`${API}/buyer-storefront/${client.client_id}?${storefrontQuery}`),
+        apiFetch(`${API}/buyer-storefront-settings/${client.client_id}?${storefrontQuery}`),
       ]);
       if (!accessRes.ok) throw new Error(await parseApiError(accessRes));
       if (!settingsRes.ok) throw new Error(await parseApiError(settingsRes));
@@ -837,7 +843,7 @@ export default function ClientStorefrontSection({ client, onBanner }: Props) {
           approved_buyers: approvedBuyerEmails.map((email) => ({ email })),
         },
       };
-      const res = await apiFetch(`${API}/buyer-storefront-settings/${client.client_id}`, {
+      const res = await apiFetch(`${API}/buyer-storefront-settings/${client.client_id}?${storefrontQuery}`, {
         method: "PUT",
         body: JSON.stringify(payload),
       });
@@ -855,7 +861,7 @@ export default function ClientStorefrontSection({ client, onBanner }: Props) {
     if (!client?.client_id) return;
     try {
       setSaving(true);
-      const res = await apiFetch(`${API}/buyer-storefront/${client.client_id}`, {
+      const res = await apiFetch(`${API}/buyer-storefront/${client.client_id}?${storefrontQuery}`, {
         method: "PUT",
         body: JSON.stringify({ enabled: !enabled }),
       });
@@ -875,6 +881,23 @@ export default function ClientStorefrontSection({ client, onBanner }: Props) {
     window.open(portalPath, "_blank", "noopener,noreferrer");
   }
 
+  async function publishToProduction() {
+    if (!client?.client_id) return;
+    try {
+      setPublishing(true);
+      const res = await apiFetch(
+        `${API}/buyer-storefront-settings/${client.client_id}/publish?from_environment=STAGING&to_environment=PROD`,
+        { method: "POST" },
+      );
+      if (!res.ok) throw new Error(await parseApiError(res));
+      onBanner("Staging storefront settings published to production.", "success");
+    } catch (err: any) {
+      onBanner(err?.message || "Failed to publish storefront settings to production.", "error");
+    } finally {
+      setPublishing(false);
+    }
+  }
+
   return (
     <div style={card}>
       <div style={titleRow}>
@@ -884,19 +907,42 @@ export default function ClientStorefrontSection({ client, onBanner }: Props) {
             Configure a storefront that works for ERP-integrated suppliers and suppliers selling directly from Ordanex.
           </div>
           <div style={sharedBanner}>
-            Storefront configuration is shared across staging and production. You are currently opening the {storefrontEnvironmentSlug(activeEnvironment)} buyer URL for {activeEnvironmentLabel} testing.
+            {isProductionWorkspace
+              ? "Production storefront settings are read-only. Use the Staging workspace to prepare access, catalog, pricing, and buyer rules, then publish them to production."
+              : `You are editing the ${storefrontEnvironmentSlug(activeEnvironment)} storefront configuration for ${activeEnvironmentLabel}. Save here, test the staging buyer URL, and publish to production when ready.`}
           </div>
         </div>
         <div style={actionsRow}>
           <button type="button" onClick={openPortal} disabled={!portalPath || loading} style={button}>
             Open storefront
           </button>
-          <button type="button" onClick={toggleAccess} disabled={!client || saving} style={button}>
+          <button
+            type="button"
+            onClick={toggleAccess}
+            disabled={!client || saving || isProductionWorkspace}
+            style={button}
+          >
             {saving ? "Saving..." : enabled ? "Disable storefront" : "Enable storefront"}
           </button>
-          <button type="button" onClick={save} disabled={!client || saving} style={buttonPrimary}>
-            {saving ? "Saving..." : "Save storefront settings"}
-          </button>
+          {!isProductionWorkspace ? (
+            <>
+              <button
+                type="button"
+                onClick={publishToProduction}
+                disabled={!client || publishing || saving}
+                style={button}
+              >
+                {publishing ? "Publishing..." : "Publish to production"}
+              </button>
+              <button type="button" onClick={save} disabled={!client || saving} style={buttonPrimary}>
+                {saving ? "Saving..." : "Save storefront settings"}
+              </button>
+            </>
+          ) : (
+            <button type="button" disabled style={buttonPrimary}>
+              Production is read-only
+            </button>
+          )}
         </div>
       </div>
 
@@ -929,6 +975,7 @@ export default function ClientStorefrontSection({ client, onBanner }: Props) {
         </div>
       </div>
 
+      <fieldset style={editorFieldset} disabled={loading || isProductionWorkspace}>
       <div style={infoStrip}>
         <div style={infoChip}>ERP-integrated sellers can sync catalog and buyer tracking from ERP.</div>
         <div style={infoChip}>Standalone sellers use the client record as the supplier profile and manage catalog, payment instructions, fulfillment, and product media in Ordanex.</div>
@@ -1772,6 +1819,7 @@ export default function ClientStorefrontSection({ client, onBanner }: Props) {
           </div>
         </div>
       </div>
+      </fieldset>
     </div>
   );
 }
@@ -1798,6 +1846,13 @@ const actionsRow: CSSProperties = {
   gap: 10,
   flexWrap: "wrap",
   justifyContent: "flex-end",
+};
+
+const editorFieldset: CSSProperties = {
+  border: "none",
+  padding: 0,
+  margin: 0,
+  minWidth: 0,
 };
 
 const title: CSSProperties = {
