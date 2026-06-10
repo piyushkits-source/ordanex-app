@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import PageHeader from "../components/common/PageHeader";
 import { apiFetch, parseApiError } from "../utils/api";
+import { useAppScope } from "../context/AppScopeContext";
+import { buildStorefrontPath, storefrontEnvironmentSlug } from "../utils/environment";
 
 const API = "/client-config";
 
@@ -59,6 +61,7 @@ function buildSyncHealth(connections: any[], erpConfigs: any[], syncEvents: any[
 }
 
 export default function ClientConfigPage() {
+  const { scope } = useAppScope();
   const [clients, setClients] = useState<any[]>([]);
   const [selectedClient, setSelectedClient] = useState<any>(null);
 
@@ -186,7 +189,7 @@ export default function ClientConfigPage() {
 
   function openBuyerStorefront() {
     if (!selectedClient?.client_id) return;
-    const url = `/portal/${selectedClient.client_id}`;
+    const url = buildStorefrontPath(selectedClient.client_id, scope.environment || "PROD");
     window.open(url, "_blank", "noopener,noreferrer");
   }
 
@@ -765,7 +768,12 @@ export default function ClientConfigPage() {
                 </div>
                 <div style={{ marginTop: 10, fontSize: 12, color: "#64748b", display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
                   <div>Preview state: {storefrontSettingsLoading ? "Loading storefront settings..." : "Ready"}</div>
-                  <div>Buyer portal path: /portal/{selectedClient?.client_id || "client-id"}</div>
+                  <div>
+                    Buyer portal path: {buildStorefrontPath(selectedClient?.client_id || "client-id", scope.environment || "PROD")}
+                  </div>
+                  <div>
+                    Storefront settings are shared across staging and production. Use the {storefrontEnvironmentSlug(scope.environment || "PROD")} URL only for testing the buyer experience in that environment.
+                  </div>
                 </div>
               </div>
 

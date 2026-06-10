@@ -3,7 +3,8 @@ import type { CSSProperties, ChangeEvent } from "react";
 import { absoluteFileUrl } from "../../../api/apiClient";
 import { apiFetch, parseApiError } from "utils/api";
 import { uploadPortalFile } from "../../../api/fileStorageApi";
-import { buildStorefrontPath } from "../../../utils/environment";
+import { buildStorefrontPath, storefrontEnvironmentSlug, workspaceEnvironmentBadge } from "../../../utils/environment";
+import { useAppScope } from "../../../context/AppScopeContext";
 
 type Props = {
   client: any;
@@ -366,6 +367,9 @@ function parseCsvText(text: string) {
 }
 
 export default function ClientStorefrontSection({ client, onBanner }: Props) {
+  const { scope } = useAppScope();
+  const activeEnvironment = scope.environment || "PROD";
+  const activeEnvironmentLabel = workspaceEnvironmentBadge(activeEnvironment);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [catalogImporting, setCatalogImporting] = useState(false);
@@ -415,8 +419,8 @@ export default function ClientStorefrontSection({ client, onBanner }: Props) {
   });
 
   const portalPath = useMemo(
-    () => buildStorefrontPath(client?.client_id, "production"),
-    [client?.client_id],
+    () => buildStorefrontPath(client?.client_id, activeEnvironment),
+    [activeEnvironment, client?.client_id],
   );
 
   const catalogItems = useMemo(() => {
@@ -879,6 +883,9 @@ export default function ClientStorefrontSection({ client, onBanner }: Props) {
           <div style={subtitle}>
             Configure a storefront that works for ERP-integrated suppliers and suppliers selling directly from Ordanex.
           </div>
+          <div style={sharedBanner}>
+            Storefront configuration is shared across staging and production. You are currently opening the {storefrontEnvironmentSlug(activeEnvironment)} buyer URL for {activeEnvironmentLabel} testing.
+          </div>
         </div>
         <div style={actionsRow}>
           <button type="button" onClick={openPortal} disabled={!portalPath || loading} style={button}>
@@ -901,6 +908,10 @@ export default function ClientStorefrontSection({ client, onBanner }: Props) {
         <div style={statusCard}>
           <div style={label}>Portal path</div>
           <div style={value}>{portalPath || "-"}</div>
+        </div>
+        <div style={statusCard}>
+          <div style={label}>Open storefront target</div>
+          <div style={value}>{activeEnvironmentLabel}</div>
         </div>
         <div style={statusCard}>
           <div style={label}>Seller model</div>
@@ -2285,6 +2296,19 @@ const previewActionHint: CSSProperties = {
   color: "#64748b",
   lineHeight: 1.5,
   flex: "1 1 220px",
+};
+
+const sharedBanner: CSSProperties = {
+  marginTop: 10,
+  borderRadius: 12,
+  border: "1px solid #c7d2fe",
+  background: "#eff6ff",
+  color: "#1d4ed8",
+  padding: "10px 12px",
+  fontSize: 12,
+  lineHeight: 1.6,
+  fontWeight: 700,
+  maxWidth: 760,
 };
 
 const productEditorGrid: CSSProperties = {
