@@ -7,9 +7,11 @@ import {
   fetchBuyerPortalSettings,
   submitBuyerOrder,
   type BuyerPortalCatalogItem,
+  type BuyerPortalChargeRule,
   type BuyerPortalMediaItem,
   type BuyerPortalOrder,
   type BuyerPortalOrderItem,
+  type BuyerPortalPricingSettings,
   type BuyerPortalSettings,
 } from "../api/buyerPortalApi";
 import { absoluteFileUrl } from "../api/apiClient";
@@ -97,6 +99,97 @@ function summarizeCatalogCharges(item: BuyerPortalCatalogItem) {
       return normalizedMode === "PERCENT" ? `${label}: ${numericValue}%` : `${label}: ${numericValue}`;
     })
     .filter(Boolean) as string[];
+}
+
+type PricingRuleContext = {
+  buyerEmail: string;
+  companyName: string;
+  soldTo: string;
+  shipTo: string;
+  shipToAddress: string;
+};
+
+function matchesRuleText(ruleValue?: string | null, actualValue?: string | null) {
+  const expected = String(ruleValue || "").trim().toLowerCase();
+  if (!expected) return true;
+  return String(actualValue || "").trim().toLowerCase().includes(expected);
+}
+
+function matchesChargeRule(
+  rule: BuyerPortalChargeRule,
+  item: BuyerPortalCatalogItem,
+  context: PricingRuleContext,
+) {
+  const sku = String(rule.sku || "").trim().toLowerCase();
+  const category = String(rule.category || "").trim().toLowerCase();
+  const brand = String(rule.brand || "").trim().toLowerCase();
+  if (sku && sku !== String(item.sku || "").trim().toLowerCase()) return false;
+  if (category && category !== String(item.category || "").trim().toLowerCase()) return false;
+  if (brand && brand !== String(item.brand || "").trim().toLowerCase()) return false;
+  if (!matchesRuleText(rule.buyer_email, context.buyerEmail)) return false;
+  if (!matchesRuleText(rule.company_name_contains, context.companyName)) return false;
+  if (!matchesRuleText(rule.sold_to_contains, context.soldTo)) return false;
+  if (!matchesRuleText(rule.ship_to_contains, context.shipTo)) return false;
+  if (!matchesRuleText(rule.ship_to_address_contains, context.shipToAddress)) return false;
+  return true;
+}
+
+function zeroChargeFields(item: BuyerPortalCatalogItem): BuyerPortalCatalogItem {
+  return {
+    ...item,
+    discount_mode: "NONE",
+    discount_value: null,
+    tax_mode: "NONE",
+    tax_value: null,
+    freight_mode: "NONE",
+    freight_value: null,
+    octroi_mode: "NONE",
+    octroi_value: null,
+    shipping_mode: "NONE",
+    shipping_value: null,
+  };
+}
+
+function applyChargeRule(item: BuyerPortalCatalogItem, rule: BuyerPortalChargeRule) {
+  const next = { ...item };
+  const prefixes = ["discount", "tax", "freight", "octroi", "shipping"] as const;
+  for (const prefix of prefixes) {
+    const modeKey = `${prefix}_mode` as keyof BuyerPortalCatalogItem & keyof BuyerPortalChargeRule;
+    const valueKey = `${prefix}_value` as keyof BuyerPortalCatalogItem & keyof BuyerPortalChargeRule;
+    const modeValue = rule[modeKey];
+    const numericValue = rule[valueKey];
+    if (modeValue !== undefined && modeValue !== null && modeValue !== "") {
+      next[modeKey] = modeValue as never;
+    }
+    if (numericValue !== undefined) {
+      next[valueKey] = numericValue as never;
+    }
+  }
+  return next;
+}
+
+function applyCheckoutPricing(
+  item: BuyerPortalCatalogItem,
+  pricing: BuyerPortalPricingSettings | null | undefined,
+  context: PricingRuleContext,
+) {
+  const buyerRules = Array.isArray(pricing?.buyer_rules) ? pricing?.buyer_rules || [] : [];
+  const shipToRules = Array.isArray(pricing?.ship_to_rules) ? pricing?.ship_to_rules || [] : [];
+  const combineWithDefaults = pricing?.combine_with_product_defaults !== false;
+
+  let effective = combineWithDefaults ? { ...item } : zeroChargeFields(item);
+
+  const buyerRule = buyerRules.find((rule) => matchesChargeRule(rule, item, context));
+  if (buyerRule) {
+    effective = applyChargeRule(effective, buyerRule);
+  }
+
+  const shipToRule = shipToRules.find((rule) => matchesChargeRule(rule, item, context));
+  if (shipToRule) {
+    effective = applyChargeRule(effective, shipToRule);
+  }
+
+  return effective;
 }
 
 function statusColor(status?: string | null) {
@@ -294,14 +387,32 @@ export default function BuyerPortalPage({ clientId: propClientId }: Props) {
       .finally(() => setLoading(false));
   }, [clientId, accessLoading, accessState?.buyer_storefront, approvedBuyerEmail]);
 
+  const pricingSettingsForCheckout = portalSettings?.pricing || {};
+
+  const pricingContext = useMemo(
+    () => ({
+      buyerEmail: approvedBuyerEmail || buyerEmail,
+      companyName,
+      soldTo: companyName || buyerName,
+      shipTo,
+      shipToAddress,
+    }),
+    [approvedBuyerEmail, buyerEmail, companyName, buyerName, shipTo, shipToAddress],
+  );
+
+  const pricedCatalog = useMemo(
+    () => catalog.map((item) => applyCheckoutPricing(item, pricingSettingsForCheckout, pricingContext)),
+    [catalog, pricingSettingsForCheckout, pricingContext],
+  );
+
   const categories = useMemo(
-    () => ["All", ...Array.from(new Set(catalog.map((item) => item.category).filter(Boolean) as string[]))],
-    [catalog],
+    () => ["All", ...Array.from(new Set(pricedCatalog.map((item) => item.category).filter(Boolean) as string[]))],
+    [pricedCatalog],
   );
 
   const filteredCatalog = useMemo(() => {
     const term = search.trim().toLowerCase();
-    return catalog.filter((item) => {
+    return pricedCatalog.filter((item) => {
       const matchesCategory = category === "All" || item.category === category;
       const matchesSearch =
         !term ||
@@ -310,7 +421,16 @@ export default function BuyerPortalPage({ clientId: propClientId }: Props) {
           .some((value) => String(value).toLowerCase().includes(term));
       return matchesCategory && matchesSearch;
     });
-  }, [catalog, search, category]);
+  }, [pricedCatalog, search, category]);
+
+  useEffect(() => {
+    setCart((current) =>
+      current.map((line) => ({
+        ...applyCheckoutPricing(line, pricingSettingsForCheckout, pricingContext),
+        quantity: line.quantity,
+      })),
+    );
+  }, [pricingSettingsForCheckout, pricingContext]);
 
   const cartPricing = useMemo(
     () =>
@@ -348,6 +468,7 @@ export default function BuyerPortalPage({ clientId: propClientId }: Props) {
   const commerce = portalSettings?.commerce || {};
   const payments = portalSettings?.payments || {};
   const experience = portalSettings?.experience || {};
+  const pricingSettings = portalSettings?.pricing || {};
   const acceptedMethods = normalizeMethods(portalSettings);
   const paymentsEnabled = payments.enabled !== false;
   const paymentMode = String(payments.mode || "INVOICE_LATER").toUpperCase();
@@ -369,7 +490,7 @@ export default function BuyerPortalPage({ clientId: propClientId }: Props) {
   const supplierPortalLabel = supplierDisplayName && supplierDisplayName !== storefrontTitle
     ? `${supplierDisplayName} Supplier Portal`
     : storefrontTitle;
-  const availableCount = catalog.filter((item) => String(item.stock_status || "Available").toLowerCase() !== "out of stock").length;
+  const availableCount = pricedCatalog.filter((item) => String(item.stock_status || "Available").toLowerCase() !== "out of stock").length;
   const categoryCount = Math.max(0, categories.length - 1);
   const compactHeadline =
     sellerMode === "STANDALONE_COMMERCE"
@@ -402,7 +523,7 @@ export default function BuyerPortalPage({ clientId: propClientId }: Props) {
 
   const galleryActiveMedia =
     galleryMedia.length > 0 ? galleryMedia[Math.min(galleryIndex, galleryMedia.length - 1)] : null;
-  const mediaWatermarkLabel = approvedBuyerEmail || buyerEmail || "Approved buyer";
+  const mediaWatermarkLabel = supplierDisplayName || supplierPortalLabel || storefrontTitle || "Configured Supplier";
 
   function addToCart(item: BuyerPortalCatalogItem) {
     setCart((current) => {

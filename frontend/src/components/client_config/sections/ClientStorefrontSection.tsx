@@ -146,6 +146,21 @@ function estimateCatalogTotal(item: CatalogItem, quantity = 1) {
   return discountedSubtotal + tax + freight + octroi + shipping;
 }
 
+function parseRulesJson(value: string, label: string) {
+  const text = value.trim();
+  if (!text) return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new Error(`${label} must be a valid JSON array.`);
+  }
+  if (!Array.isArray(parsed)) {
+    throw new Error(`${label} must be a JSON array.`);
+  }
+  return parsed.filter((entry) => entry && typeof entry === "object");
+}
+
 function parseSpecifications(value: unknown) {
   if (!value) return null;
   if (typeof value === "object" && !Array.isArray(value)) {
@@ -393,6 +408,9 @@ export default function ClientStorefrontSection({ client, onBanner }: Props) {
     show_product_specs: "YES",
     show_inventory_status: "YES",
     show_checkout_promises: "YES",
+    pricing_combine_defaults: "YES",
+    pricing_buyer_rules_json: "[]",
+    pricing_ship_to_rules_json: "[]",
   });
 
   const portalPath = useMemo(
@@ -449,6 +467,7 @@ export default function ClientStorefrontSection({ client, onBanner }: Props) {
       const commerce = settings.commerce || {};
       const payments = settings.payments || {};
       const experience = settings.experience || {};
+      const pricing = settings.pricing || {};
       const accessCfg = settings.access || {};
       const supplierName = client?.client_name || commerce.supplier_display_name || "";
 
@@ -508,6 +527,9 @@ export default function ClientStorefrontSection({ client, onBanner }: Props) {
         show_product_specs: experience.show_product_specs === false ? "NO" : "YES",
         show_inventory_status: experience.show_inventory_status === false ? "NO" : "YES",
         show_checkout_promises: experience.show_checkout_promises === false ? "NO" : "YES",
+        pricing_combine_defaults: pricing.combine_with_product_defaults === false ? "NO" : "YES",
+        pricing_buyer_rules_json: JSON.stringify(Array.isArray(pricing.buyer_rules) ? pricing.buyer_rules : [], null, 2),
+        pricing_ship_to_rules_json: JSON.stringify(Array.isArray(pricing.ship_to_rules) ? pricing.ship_to_rules : [], null, 2),
       });
     } catch (err: any) {
       onBanner(err?.message || "Failed to load storefront settings.", "error");
@@ -800,6 +822,11 @@ export default function ClientStorefrontSection({ client, onBanner }: Props) {
           show_inventory_status: form.show_inventory_status === "YES",
           show_checkout_promises: form.show_checkout_promises === "YES",
         },
+        pricing: {
+          combine_with_product_defaults: form.pricing_combine_defaults === "YES",
+          buyer_rules: parseRulesJson(form.pricing_buyer_rules_json, "Buyer pricing rules"),
+          ship_to_rules: parseRulesJson(form.pricing_ship_to_rules_json, "Ship-to pricing rules"),
+        },
         access: {
           approval_mode: "EMAIL_APPROVAL",
           approved_buyers: approvedBuyerEmails.map((email) => ({ email })),
@@ -1065,6 +1092,60 @@ export default function ClientStorefrontSection({ client, onBanner }: Props) {
             <option value="YES">Yes</option>
             <option value="NO">No</option>
           </select>
+        </div>
+
+        <div style={wideFieldCard}>
+          <div style={fieldLabel}>Checkout pricing behavior</div>
+          <div style={helper}>
+            Keep product charges as defaults, then optionally override them by buyer, company, sold-to, ship-to, address, SKU, category, or brand.
+          </div>
+          <div style={{ display: "grid", gap: 12, marginTop: 12 }}>
+            <div>
+              <div style={fieldLabel}>Combine buyer rules with product defaults</div>
+              <select
+                style={input}
+                value={form.pricing_combine_defaults}
+                onChange={(e) => setForm((prev) => ({ ...prev, pricing_combine_defaults: e.target.value }))}
+              >
+                <option value="YES">Yes</option>
+                <option value="NO">No</option>
+              </select>
+            </div>
+            <div>
+              <div style={fieldLabel}>Buyer pricing rules (JSON array)</div>
+              <div style={helper}>
+                Match using buyer_email, company_name_contains, sold_to_contains, sku, category, or brand. Rule values override product defaults when matched.
+              </div>
+              <textarea
+                style={{
+                  ...input,
+                  minHeight: 132,
+                  fontFamily:
+                    'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace',
+                  resize: "vertical",
+                }}
+                value={form.pricing_buyer_rules_json}
+                onChange={(e) => setForm((prev) => ({ ...prev, pricing_buyer_rules_json: e.target.value }))}
+              />
+            </div>
+            <div>
+              <div style={fieldLabel}>Ship-to pricing rules (JSON array)</div>
+              <div style={helper}>
+                Match using ship_to_contains, ship_to_address_contains, and optionally sku, category, or brand. Use this for region, tax, freight, octroi, shipping, or discount differences.
+              </div>
+              <textarea
+                style={{
+                  ...input,
+                  minHeight: 132,
+                  fontFamily:
+                    'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace',
+                  resize: "vertical",
+                }}
+                value={form.pricing_ship_to_rules_json}
+                onChange={(e) => setForm((prev) => ({ ...prev, pricing_ship_to_rules_json: e.target.value }))}
+              />
+            </div>
+          </div>
         </div>
 
         <div style={wideFieldCard}>

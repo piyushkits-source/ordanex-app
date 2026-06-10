@@ -173,6 +173,11 @@ DEFAULT_STOREFRONT_SETTINGS = {
         "show_inventory_status": True,
         "show_checkout_promises": True,
     },
+    "pricing": {
+        "combine_with_product_defaults": True,
+        "buyer_rules": [],
+        "ship_to_rules": [],
+    },
     "access": {
         "approval_mode": "EMAIL_APPROVAL",
         "approved_buyers": [],
@@ -264,6 +269,17 @@ class BuyerPortalService:
             **DEFAULT_STOREFRONT_SETTINGS["experience"],
             **(payload.get("experience") if isinstance(payload.get("experience"), dict) else {}),
         }
+        merged["pricing"] = {
+            **DEFAULT_STOREFRONT_SETTINGS["pricing"],
+            **(payload.get("pricing") if isinstance(payload.get("pricing"), dict) else {}),
+        }
+        if not isinstance(merged["pricing"].get("buyer_rules"), list):
+            merged["pricing"]["buyer_rules"] = []
+        if not isinstance(merged["pricing"].get("ship_to_rules"), list):
+            merged["pricing"]["ship_to_rules"] = []
+        merged["pricing"]["combine_with_product_defaults"] = bool(
+            merged["pricing"].get("combine_with_product_defaults", True)
+        )
         if not isinstance(merged["catalog"].get("items"), list):
             merged["catalog"]["items"] = []
         source_mode = str(merged["catalog"].get("source_mode") or "ERP_SYNCED").strip().upper()
@@ -342,6 +358,7 @@ class BuyerPortalService:
         commerce = payload.get("commerce") if isinstance(payload.get("commerce"), dict) else {}
         payments = payload.get("payments") if isinstance(payload.get("payments"), dict) else {}
         experience = payload.get("experience") if isinstance(payload.get("experience"), dict) else {}
+        pricing = payload.get("pricing") if isinstance(payload.get("pricing"), dict) else {}
         current["branding"] = {**current["branding"], **branding}
         current["catalog"] = {**current["catalog"], **catalog}
         current["commerce"] = {**current.get("commerce", {}), **commerce}
@@ -350,6 +367,14 @@ class BuyerPortalService:
             current["commerce"]["supplier_display_name"] = client_name
         current["payments"] = {**current.get("payments", {}), **payments}
         current["experience"] = {**current.get("experience", {}), **experience}
+        current["pricing"] = {**current.get("pricing", {}), **pricing}
+        if not isinstance(current["pricing"].get("buyer_rules"), list):
+            current["pricing"]["buyer_rules"] = []
+        if not isinstance(current["pricing"].get("ship_to_rules"), list):
+            current["pricing"]["ship_to_rules"] = []
+        current["pricing"]["combine_with_product_defaults"] = bool(
+            current["pricing"].get("combine_with_product_defaults", True)
+        )
         source_mode = str(current["catalog"].get("source_mode") or "ERP_SYNCED").strip().upper()
         if source_mode not in {"ERP_SYNCED", "PLATFORM_MANAGED"}:
             source_mode = "ERP_SYNCED"

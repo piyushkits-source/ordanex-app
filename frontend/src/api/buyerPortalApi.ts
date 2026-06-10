@@ -84,6 +84,33 @@ export interface BuyerPortalExperienceSettings {
   show_checkout_promises?: boolean;
 }
 
+export interface BuyerPortalChargeRule {
+  sku?: string;
+  category?: string;
+  brand?: string;
+  buyer_email?: string;
+  company_name_contains?: string;
+  sold_to_contains?: string;
+  ship_to_contains?: string;
+  ship_to_address_contains?: string;
+  discount_mode?: string | null;
+  discount_value?: number | null;
+  tax_mode?: string | null;
+  tax_value?: number | null;
+  freight_mode?: string | null;
+  freight_value?: number | null;
+  octroi_mode?: string | null;
+  octroi_value?: number | null;
+  shipping_mode?: string | null;
+  shipping_value?: number | null;
+}
+
+export interface BuyerPortalPricingSettings {
+  combine_with_product_defaults?: boolean;
+  buyer_rules?: BuyerPortalChargeRule[];
+  ship_to_rules?: BuyerPortalChargeRule[];
+}
+
 export interface BuyerPortalSettings {
   client_id?: string;
   branding?: {
@@ -104,6 +131,7 @@ export interface BuyerPortalSettings {
   commerce?: BuyerPortalCommerceSettings;
   payments?: BuyerPortalPaymentSettings;
   experience?: BuyerPortalExperienceSettings;
+  pricing?: BuyerPortalPricingSettings;
   [key: string]: any;
 }
 
