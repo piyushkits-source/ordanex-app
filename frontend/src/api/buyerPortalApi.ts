@@ -137,6 +137,7 @@ export interface BuyerPortalSettings {
 
 export interface BuyerPortalOrderCreate {
   client_id: string;
+  environment?: string | null;
   buyer_name: string;
   buyer_email: string;
   company_name?: string | null;
@@ -233,9 +234,13 @@ export interface BuyerPortalCommerceUpdate {
   shipment?: BuyerPortalShipmentDetails | null;
 }
 
-export async function fetchBuyerAccess(clientId: string, buyerEmail?: string) {
+export async function fetchBuyerAccess(clientId: string, buyerEmail?: string, environment?: string) {
   const { data } = await apiClient.get("/buyer-portal/access", {
-    params: { client_id: clientId, buyer_email: buyerEmail || undefined },
+    params: {
+      client_id: clientId,
+      buyer_email: buyerEmail || undefined,
+      environment: environment || undefined,
+    },
   });
   return data as {
     client_id: string;
@@ -250,16 +255,24 @@ export async function fetchBuyerAccess(clientId: string, buyerEmail?: string) {
   };
 }
 
-export async function fetchBuyerCatalog(clientId: string, buyerEmail?: string) {
+export async function fetchBuyerCatalog(clientId: string, buyerEmail?: string, environment?: string) {
   const { data } = await apiClient.get("/buyer-portal/catalog", {
-    params: { client_id: clientId, buyer_email: buyerEmail || undefined },
+    params: {
+      client_id: clientId,
+      buyer_email: buyerEmail || undefined,
+      environment: environment || undefined,
+    },
   });
   return data as BuyerPortalCatalogItem[];
 }
 
-export async function fetchBuyerOrders(clientId: string, buyerEmail?: string) {
+export async function fetchBuyerOrders(clientId: string, buyerEmail?: string, environment?: string) {
   const { data } = await apiClient.get("/buyer-portal/orders", {
-    params: { client_id: clientId, buyer_email: buyerEmail || undefined },
+    params: {
+      client_id: clientId,
+      buyer_email: buyerEmail || undefined,
+      environment: environment || undefined,
+    },
   });
   return data as BuyerPortalOrder[];
 }
@@ -274,9 +287,9 @@ export async function fetchBuyerOrder(poId: string) {
   return data as BuyerPortalOrder;
 }
 
-export async function fetchBuyerPortalSettings(clientId: string) {
+export async function fetchBuyerPortalSettings(clientId: string, environment?: string) {
   const { data } = await apiClient.get("/buyer-portal/settings", {
-    params: { client_id: clientId },
+    params: { client_id: clientId, environment: environment || undefined },
   });
   return data as BuyerPortalSettings;
 }

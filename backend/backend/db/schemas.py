@@ -546,6 +546,7 @@ class BuyerPortalOrderItem(BaseModel):
 
 class BuyerPortalOrderCreate(BaseModel):
     client_id: str
+    environment: str | None = None
     buyer_name: str
     buyer_email: str
     company_name: str | None = None

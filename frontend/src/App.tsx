@@ -65,6 +65,7 @@ export default function App() {
       />
 
       <Route path="/portal/:clientId" element={<BuyerPortalPage />} />
+      <Route path="/portal/:environment/:clientId" element={<BuyerPortalPage />} />
 
       <Route
         element={
@@ -85,6 +86,7 @@ export default function App() {
         <Route path="/reports" element={<AccessRoute moduleKey="reports"><ReportsPage /></AccessRoute>} />
         <Route path="/analytics" element={<AccessRoute moduleKey="analytics"><AnalyticsPage /></AccessRoute>} />
         <Route path="/supplier/:clientId/orders" element={<AccessRoute moduleKey="client_config"><SupplierOrdersPage /></AccessRoute>} />
+        <Route path="/supplier/:environment/:clientId/orders" element={<AccessRoute moduleKey="client_config"><SupplierOrdersPage /></AccessRoute>} />
         <Route path="/supplier/orders/:poId/commerce" element={<AccessRoute moduleKey="client_config"><SupplierCommerceDeskPage /></AccessRoute>} />
       </Route>
 

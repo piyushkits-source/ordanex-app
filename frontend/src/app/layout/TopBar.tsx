@@ -1,7 +1,11 @@
 import { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import UserMenu from "../../components/common/UserMenu";
-import { getFrontendEnvironmentLabel, workspaceEnvironmentBadge } from "../../utils/environment";
+import {
+  buildStorefrontPath,
+  getFrontendEnvironmentLabel,
+  workspaceEnvironmentBadge,
+} from "../../utils/environment";
 import { apiFetch } from "../../utils/api";
 import { useAppScope } from "../../context/AppScopeContext";
 import { getAuth } from "../../utils/auth";
@@ -28,8 +32,9 @@ export default function TopBar() {
   const navigate = useNavigate();
   const [environment, setEnvironment] = useState(getFrontendEnvironmentLabel());
   const activeClientId = auth?.client_id || scope.clientId;
-  const storefrontPath =
-    activeClientId && canAccessModule(auth, "buyer_storefront") ? `/portal/${activeClientId}` : "";
+  const storefrontPath = canAccessModule(auth, "buyer_storefront")
+    ? buildStorefrontPath(activeClientId, scope.environment || environment)
+    : "";
 
   useEffect(() => {
     if (scope.environment) {

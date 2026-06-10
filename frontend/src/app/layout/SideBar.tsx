@@ -11,6 +11,7 @@ import {
 } from "react-icons/fa";
 import { getAuth } from "../../utils/auth";
 import { canAccessModule, type AppModuleKey } from "../../utils/access";
+import { buildStorefrontPath } from "../../utils/environment";
 
 const menu = [
   { label: "Message Monitor", path: "/monitoring", icon: <FaInbox />, moduleKey: "monitoring" as AppModuleKey },
@@ -33,7 +34,10 @@ export default function Sidebar() {
       <div style={header}>Workspace</div>
 
       {visibleMenu.map((item) => {
-        const resolvedPath = item.path === "/portal" && auth?.client_id ? `/portal/${auth.client_id}` : item.path;
+        const resolvedPath =
+          item.path === "/portal"
+            ? buildStorefrontPath(auth?.client_id, auth?.environment) || item.path
+            : item.path;
         const active = location.pathname.startsWith(item.path);
 
         return (

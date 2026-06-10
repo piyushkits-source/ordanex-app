@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, datetime
 import json
+import os
 from pathlib import Path
 import re
 from typing import Any
@@ -15,6 +16,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from backend.core.deps import UserContext
 from backend.db import models, schemas
+from backend.services.email_service import send_application_email
 from backend.services.purchase_order_service import purchase_order_service
 from backend.services.entitlement_service import get_client_entitlements, has_buyer_storefront_access
 try:
@@ -199,6 +201,88 @@ class BuyerPortalService:
     def _normalize_email(self, value: Any) -> str:
         return str(value or "").strip().lower()
 
+    def _normalize_environment(self, value: Any) -> str:
+        normalized = str(value or "").strip().upper()
+        if normalized in {"STAGING", "STAGE", "STG"}:
+            return "STAGING"
+        return "PROD"
+
+    def _portal_url(self, client_id: str, environment: str | None = None) -> str:
+        base = os.getenv("FRONTEND_BASE_URL") or os.getenv("APP_BASE_URL") or "http://127.0.0.1:5173"
+        environment_code = self._normalize_environment(environment)
+        if environment_code == "STAGING":
+            return f"{base.rstrip('/')}/portal/staging/{quote(client_id, safe='')}"
+        return f"{base.rstrip('/')}/portal/{quote(client_id, safe='')}"
+
+    def _send_buyer_update_email(
+        self,
+        po: models.PurchaseOrder,
+        meta: dict[str, Any],
+        *,
+        invoice_payload: dict[str, Any] | None = None,
+        shipment_payload: dict[str, Any] | None = None,
+        payment_payload: dict[str, Any] | None = None,
+    ) -> None:
+        buyer_email = self._normalize_email(meta.get("buyer_email"))
+        if not buyer_email:
+            return
+
+        po_ref = getattr(po, "po_number", None) or str(getattr(po, "po_id", ""))
+        supplier_name = str(getattr(po, "supplier_name", None) or meta.get("supplier_display_name") or "Configured Supplier").strip()
+        environment_code = self._normalize_environment(getattr(po, "environment", None))
+        portal_url = self._portal_url(po.client_id, environment_code)
+
+        highlights: list[str] = []
+        if invoice_payload:
+            invoice_number = invoice_payload.get("invoice_number")
+            invoice_status = invoice_payload.get("payment_status")
+            invoice_amount = invoice_payload.get("invoice_amount")
+            if invoice_number:
+                highlights.append(f"Invoice shared: {invoice_number}")
+            if invoice_amount not in (None, ""):
+                highlights.append(f"Invoice amount: {invoice_amount} {invoice_payload.get('currency') or getattr(po, 'currency', '')}".strip())
+            if invoice_status:
+                highlights.append(f"Invoice payment status: {invoice_status}")
+        if shipment_payload:
+            shipment_number = shipment_payload.get("shipment_number")
+            shipment_status = shipment_payload.get("shipment_status")
+            tracking_number = shipment_payload.get("tracking_number")
+            if shipment_number:
+                highlights.append(f"Shipment number: {shipment_number}")
+            if shipment_status:
+                highlights.append(f"Shipment status: {shipment_status}")
+            if tracking_number:
+                highlights.append(f"Tracking number: {tracking_number}")
+        if payment_payload:
+            payment_status = payment_payload.get("payment_status")
+            payment_reference = payment_payload.get("payment_reference")
+            if payment_status:
+                highlights.append(f"Payment status: {payment_status}")
+            if payment_reference:
+                highlights.append(f"Payment reference: {payment_reference}")
+
+        if not highlights:
+            return
+
+        body_html = "".join(
+            [
+                "<h2>Buyer Order Update</h2>",
+                f"<p><strong>Supplier:</strong> {supplier_name}</p>",
+                f"<p><strong>Order:</strong> {po_ref}</p>",
+                f"<p><strong>Environment:</strong> {environment_code}</p>",
+                "<p>Your supplier updated the order details in Ordanex.</p>",
+                "<ul>",
+                "".join(f"<li>{item}</li>" for item in highlights),
+                "</ul>",
+                f'<p><a href="{portal_url}">Open buyer portal</a> to review the latest order status.</p>',
+            ]
+        )
+        subject = f"[Ordanex] Update for order {po_ref}"
+        try:
+            send_application_email([buyer_email], subject, body_html)
+        except Exception:
+            return
+
     def _normalize_approved_buyers(self, value: Any) -> list[dict[str, Any]]:
         if not isinstance(value, list):
             return []
@@ -326,10 +410,11 @@ class BuyerPortalService:
         }
         return merged
 
-    def get_settings(self, db: Session, client_id: str) -> dict[str, Any]:
+    def get_settings(self, db: Session, client_id: str, environment: str | None = None) -> dict[str, Any]:
         self.assert_access(db, client_id)
         row = self._settings_row(db, client_id)
         payload = self._settings_payload(row)
+        environment_code = self._normalize_environment(environment)
         payload["commerce"]["supplier_display_name"] = (
             self._client_name(db, client_id)
             or payload.get("commerce", {}).get("supplier_display_name")
@@ -337,6 +422,7 @@ class BuyerPortalService:
         )
         return {
             "client_id": client_id,
+            "environment": environment_code,
             **payload,
         }
 
@@ -409,10 +495,17 @@ class BuyerPortalService:
             **self._settings_payload(row),
         }
 
-    def get_access_state(self, db: Session, client_id: str, buyer_email: str | None = None) -> dict[str, Any]:
+    def get_access_state(
+        self,
+        db: Session,
+        client_id: str,
+        buyer_email: str | None = None,
+        environment: str | None = None,
+    ) -> dict[str, Any]:
         entitlements = get_client_entitlements(db, client_id)
         settings_row = self._settings_row(db, client_id)
         settings = self._settings_payload(settings_row)
+        environment_code = self._normalize_environment(environment)
         approved_buyers = settings.get("access", {}).get("approved_buyers", [])
         normalized_email = self._normalize_email(buyer_email)
         approved = False
@@ -426,6 +519,7 @@ class BuyerPortalService:
         approval_required = True
         return {
             "client_id": client_id,
+            "environment": environment_code,
             **entitlements,
             "buyer_email": normalized_email or None,
             "buyer_approved": approved,
@@ -535,7 +629,13 @@ class BuyerPortalService:
 
         return protected
 
-    def get_catalog(self, db: Session, client_id: str, buyer_email: str | None = None) -> list[dict[str, Any]]:
+    def get_catalog(
+        self,
+        db: Session,
+        client_id: str,
+        buyer_email: str | None = None,
+        environment: str | None = None,
+    ) -> list[dict[str, Any]]:
         access_state = self.assert_buyer_authorized(db, client_id, buyer_email)
         approved_email = str(access_state.get("buyer_email") or buyer_email or "").strip().lower()
         supplier_name = self._client_name(db, client_id) or "Configured Supplier"
@@ -946,7 +1046,7 @@ class BuyerPortalService:
             sender=payload.buyer_email,
             receiver=payload.client_id,
             direction="INBOUND",
-            environment="PROD",
+            environment=self._normalize_environment(payload.environment),
             received_at=datetime.utcnow(),
             status=initial_status,
             source_type="BUYER_PORTAL",
@@ -1051,14 +1151,22 @@ class BuyerPortalService:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found.")
         return self._serialize_order(po)
 
-    def list_orders(self, db: Session, client_id: str, buyer_email: str | None = None):
+    def list_orders(
+        self,
+        db: Session,
+        client_id: str,
+        buyer_email: str | None = None,
+        environment: str | None = None,
+    ):
         self.assert_access(db, client_id)
         if buyer_email:
             self.assert_buyer_authorized(db, client_id, buyer_email)
+        environment_code = self._normalize_environment(environment)
         query = (
             db.query(models.PurchaseOrder)
             .options(joinedload(models.PurchaseOrder.items))
             .filter(models.PurchaseOrder.client_id == client_id)
+            .filter(models.PurchaseOrder.environment == environment_code)
             .order_by(models.PurchaseOrder.created_at.desc())
         )
         if buyer_email:
@@ -1132,6 +1240,13 @@ class BuyerPortalService:
         db.add(po)
         db.commit()
         db.refresh(po)
+        self._send_buyer_update_email(
+            po,
+            meta,
+            invoice_payload=invoice_payload,
+            shipment_payload=shipment_payload,
+            payment_payload=payment_payload,
+        )
         return self._serialize_order(po)
 
 

@@ -3,6 +3,7 @@ import type { CSSProperties, ChangeEvent } from "react";
 import { absoluteFileUrl } from "../../../api/apiClient";
 import { apiFetch, parseApiError } from "utils/api";
 import { uploadPortalFile } from "../../../api/fileStorageApi";
+import { buildStorefrontPath } from "../../../utils/environment";
 
 type Props = {
   client: any;
@@ -414,7 +415,7 @@ export default function ClientStorefrontSection({ client, onBanner }: Props) {
   });
 
   const portalPath = useMemo(
-    () => (client?.client_id ? `/portal/${client.client_id}` : ""),
+    () => buildStorefrontPath(client?.client_id, "production"),
     [client?.client_id],
   );
 

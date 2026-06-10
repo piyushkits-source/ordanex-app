@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { useParams } from "react-router-dom";
 import { fetchBuyerOrders, type BuyerPortalOrder } from "../api/buyerPortalApi";
 
 type Props = {
@@ -10,6 +11,12 @@ function resolveClientId(explicitClientId?: string) {
   if (typeof window === "undefined") return "";
   const parts = window.location.pathname.split("/").filter(Boolean);
   return parts[parts.length - 2] || "";
+}
+
+function resolvePortalEnvironment(explicitEnvironment?: string) {
+  const normalized = String(explicitEnvironment || "").trim().toLowerCase();
+  if (normalized === "staging" || normalized === "stage" || normalized === "stg") return "staging";
+  return "production";
 }
 
 function statusColors(status?: string | null) {
@@ -24,7 +31,15 @@ function statusColors(status?: string | null) {
 }
 
 export default function SupplierOrdersPage({ clientId: propClientId }: Props) {
-  const clientId = useMemo(() => resolveClientId(propClientId), [propClientId]);
+  const params = useParams<{ clientId?: string; environment?: string }>();
+  const clientId = useMemo(
+    () => propClientId || params.clientId || resolveClientId(undefined),
+    [params.clientId, propClientId],
+  );
+  const storefrontEnvironment = useMemo(
+    () => resolvePortalEnvironment(params.environment),
+    [params.environment],
+  );
   const [loading, setLoading] = useState(true);
   const [banner, setBanner] = useState<string | null>(null);
   const [orders, setOrders] = useState<BuyerPortalOrder[]>([]);
@@ -37,11 +52,11 @@ export default function SupplierOrdersPage({ clientId: propClientId }: Props) {
       return;
     }
     setLoading(true);
-    fetchBuyerOrders(clientId)
+    fetchBuyerOrders(clientId, undefined, storefrontEnvironment)
       .then((rows) => setOrders(Array.isArray(rows) ? rows : []))
       .catch((err: any) => setBanner(err?.message || "Failed to load supplier orders."))
       .finally(() => setLoading(false));
-  }, [clientId]);
+  }, [clientId, storefrontEnvironment]);
 
   const filteredOrders = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -61,7 +76,7 @@ export default function SupplierOrdersPage({ clientId: propClientId }: Props) {
             <div style={eyebrow}>Supplier operations</div>
             <div style={title}>Portal-managed order dashboard</div>
             <div style={subtitle}>
-              Review portal orders for client {clientId || "-"}, then open invoice and shipment maintenance from one place.
+              Review {storefrontEnvironment} portal orders for client {clientId || "-"}, then open invoice and shipment maintenance from one place.
             </div>
           </div>
           <div style={heroMeta}>/supplier/{clientId || "clientId"}/orders</div>

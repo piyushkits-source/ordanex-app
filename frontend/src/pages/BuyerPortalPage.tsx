@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { useParams } from "react-router-dom";
 import {
   fetchBuyerAccess,
   fetchBuyerCatalog,
@@ -39,8 +40,14 @@ function resolveClientId(explicitClientId?: string) {
   return parts[parts.length - 1] || "";
 }
 
-function buyerAccessStorageKey(clientId: string) {
-  return `ordanex_buyer_access_${clientId}`;
+function resolvePortalEnvironment(explicitEnvironment?: string) {
+  const normalized = String(explicitEnvironment || "").trim().toLowerCase();
+  if (normalized === "staging" || normalized === "stage" || normalized === "stg") return "staging";
+  return "production";
+}
+
+function buyerAccessStorageKey(clientId: string, environment: string) {
+  return `ordanex_buyer_access_${environment}_${clientId}`;
 }
 
 function money(value: number, currency = "USD") {
@@ -306,7 +313,16 @@ function buildTrackingSteps(
 }
 
 export default function BuyerPortalPage({ clientId: propClientId }: Props) {
-  const clientId = useMemo(() => resolveClientId(propClientId), [propClientId]);
+  const params = useParams<{ clientId?: string; environment?: string }>();
+  const clientId = useMemo(
+    () => propClientId || params.clientId || resolveClientId(undefined),
+    [params.clientId, propClientId],
+  );
+  const storefrontEnvironment = useMemo(
+    () => resolvePortalEnvironment(params.environment),
+    [params.environment],
+  );
+  const storefrontEnvironmentLabel = storefrontEnvironment === "staging" ? "Staging" : "Production";
   const [accessState, setAccessState] = useState<any>(null);
   const [accessLoading, setAccessLoading] = useState(true);
   const [approvalChecking, setApprovalChecking] = useState(false);
@@ -345,18 +361,18 @@ export default function BuyerPortalPage({ clientId: propClientId }: Props) {
     setAccessLoading(true);
     const savedBuyerEmail =
       typeof window !== "undefined"
-        ? window.sessionStorage.getItem(buyerAccessStorageKey(clientId)) || ""
+        ? window.sessionStorage.getItem(buyerAccessStorageKey(clientId, storefrontEnvironment)) || ""
         : "";
     if (savedBuyerEmail) {
       setBuyerEmail(savedBuyerEmail);
     }
-    fetchBuyerAccess(clientId, savedBuyerEmail || undefined)
+    fetchBuyerAccess(clientId, savedBuyerEmail || undefined, storefrontEnvironment)
       .then((state) => {
         setAccessState(state);
         if (savedBuyerEmail && state?.buyer_approved) {
           setApprovedBuyerEmail(savedBuyerEmail.trim().toLowerCase());
         } else if (typeof window !== "undefined") {
-          window.sessionStorage.removeItem(buyerAccessStorageKey(clientId));
+          window.sessionStorage.removeItem(buyerAccessStorageKey(clientId, storefrontEnvironment));
         }
       })
       .catch((err: any) => {
@@ -364,19 +380,22 @@ export default function BuyerPortalPage({ clientId: propClientId }: Props) {
         setBanner(err?.message || "Buyer storefront access is not enabled for this client.");
       })
       .finally(() => setAccessLoading(false));
-  }, [clientId]);
+  }, [clientId, storefrontEnvironment]);
 
   useEffect(() => {
     if (!clientId || accessLoading || !accessState?.buyer_storefront || !approvedBuyerEmail) return;
-    fetchBuyerPortalSettings(clientId)
+    fetchBuyerPortalSettings(clientId, storefrontEnvironment)
       .then((settings) => setPortalSettings(settings || null))
       .catch((err: any) => setBanner(err?.message || "Failed to load storefront settings."));
-  }, [clientId, accessLoading, accessState?.buyer_storefront, approvedBuyerEmail]);
+  }, [clientId, accessLoading, accessState?.buyer_storefront, approvedBuyerEmail, storefrontEnvironment]);
 
   useEffect(() => {
     if (!clientId || accessLoading || !accessState?.buyer_storefront || !approvedBuyerEmail) return;
     setLoading(true);
-    Promise.all([fetchBuyerCatalog(clientId, approvedBuyerEmail), fetchBuyerOrders(clientId, approvedBuyerEmail)])
+    Promise.all([
+      fetchBuyerCatalog(clientId, approvedBuyerEmail, storefrontEnvironment),
+      fetchBuyerOrders(clientId, approvedBuyerEmail, storefrontEnvironment),
+    ])
       .then(([catalogRows, orders]) => {
         setCatalog(Array.isArray(catalogRows) ? catalogRows : []);
         setRecentOrders(Array.isArray(orders) ? orders : []);
@@ -385,7 +404,7 @@ export default function BuyerPortalPage({ clientId: propClientId }: Props) {
       })
       .catch((err: any) => setBanner(err?.message || "Failed to load storefront data."))
       .finally(() => setLoading(false));
-  }, [clientId, accessLoading, accessState?.buyer_storefront, approvedBuyerEmail]);
+  }, [clientId, accessLoading, accessState?.buyer_storefront, approvedBuyerEmail, storefrontEnvironment]);
 
   const pricingSettingsForCheckout = portalSettings?.pricing || {};
 
@@ -588,6 +607,16 @@ export default function BuyerPortalPage({ clientId: propClientId }: Props) {
     setGalleryIndex(0);
   }
 
+  function openMonitorOrder(order: BuyerPortalOrder) {
+    const targetEnvironment = String(order.environment || storefrontEnvironment || "PROD").toUpperCase();
+    const params = new URLSearchParams({
+      po_id: order.po_id,
+      client_id: order.client_id || clientId,
+      environment: targetEnvironment,
+    });
+    window.open(`/monitoring?${params.toString()}`, "_blank", "noopener,noreferrer");
+  }
+
   async function verifyBuyerAccess() {
     const normalizedEmail = buyerEmail.trim().toLowerCase();
     if (!clientId) {
@@ -600,7 +629,7 @@ export default function BuyerPortalPage({ clientId: propClientId }: Props) {
     }
     try {
       setApprovalChecking(true);
-      const state = await fetchBuyerAccess(clientId, normalizedEmail);
+      const state = await fetchBuyerAccess(clientId, normalizedEmail, storefrontEnvironment);
       setAccessState(state);
       if (!state?.buyer_approved) {
         throw new Error(state?.access_message || "This buyer email is not approved for the storefront.");
@@ -608,7 +637,10 @@ export default function BuyerPortalPage({ clientId: propClientId }: Props) {
       setApprovedBuyerEmail(normalizedEmail);
       setBuyerEmail(normalizedEmail);
       if (typeof window !== "undefined") {
-        window.sessionStorage.setItem(buyerAccessStorageKey(clientId), normalizedEmail);
+        window.sessionStorage.setItem(
+          buyerAccessStorageKey(clientId, storefrontEnvironment),
+          normalizedEmail,
+        );
       }
       setBanner(`Access approved for ${normalizedEmail}. Protected catalog media is now enabled for this session.`);
     } catch (err: any) {
@@ -617,7 +649,7 @@ export default function BuyerPortalPage({ clientId: propClientId }: Props) {
       setRecentOrders([]);
       setSubmittedOrder(null);
       if (typeof window !== "undefined") {
-        window.sessionStorage.removeItem(buyerAccessStorageKey(clientId));
+        window.sessionStorage.removeItem(buyerAccessStorageKey(clientId, storefrontEnvironment));
       }
       setBanner(err?.message || "Unable to verify buyer access.");
     } finally {
@@ -634,7 +666,20 @@ export default function BuyerPortalPage({ clientId: propClientId }: Props) {
     setGalleryProduct(null);
     setGalleryIndex(0);
     if (typeof window !== "undefined" && clientId) {
-      window.sessionStorage.removeItem(buyerAccessStorageKey(clientId));
+      window.sessionStorage.removeItem(buyerAccessStorageKey(clientId, storefrontEnvironment));
+    }
+  }
+
+  async function openOrderDetails(orderId: string) {
+    try {
+      setLoading(true);
+      const detail = await fetchBuyerOrder(orderId);
+      setSubmittedOrder(detail);
+      setBanner(`Loaded order ${detail.po_number || detail.po_id} for review.`);
+    } catch (err: any) {
+      setBanner(err?.message || "Failed to load order details.");
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -656,6 +701,7 @@ export default function BuyerPortalPage({ clientId: propClientId }: Props) {
     try {
       const order = await submitBuyerOrder({
         client_id: clientId,
+        environment: storefrontEnvironment,
         buyer_name: buyerName,
         buyer_email: approvedBuyerEmail,
         company_name: companyName || undefined,
@@ -711,7 +757,7 @@ export default function BuyerPortalPage({ clientId: propClientId }: Props) {
         payment_proof_url: refreshed.payment_proof_url || orderWithProof.payment_proof_url,
         payment_proof_data_url: refreshed.payment_proof_data_url || orderWithProof.payment_proof_data_url,
       });
-      const history = await fetchBuyerOrders(clientId, approvedBuyerEmail);
+      const history = await fetchBuyerOrders(clientId, approvedBuyerEmail, storefrontEnvironment);
       setRecentOrders(Array.isArray(history) ? history : []);
     } catch (err: any) {
       setBanner(err?.message || "Failed to place order.");
@@ -810,6 +856,9 @@ export default function BuyerPortalPage({ clientId: propClientId }: Props) {
               </div>
               <div style={brandPillRow}>
                 <span style={{ ...brandPill, background: "#dbeafe", color: "#1d4ed8", borderColor: "#bfdbfe" }}>Protected media session</span>
+                <span style={{ ...brandPill, background: storefrontEnvironment === "staging" ? "#fef3c7" : "#dcfce7", color: storefrontEnvironment === "staging" ? "#92400e" : "#166534", borderColor: storefrontEnvironment === "staging" ? "#fcd34d" : "#86efac" }}>
+                  {storefrontEnvironmentLabel}
+                </span>
                 <span style={brandPill}>{approvedBuyerEmail}</span>
                 <span style={brandPill}>{supplierDisplayName}</span>
                 <button type="button" onClick={resetBuyerAccess} style={ghostButton}>
@@ -1238,6 +1287,15 @@ export default function BuyerPortalPage({ clientId: propClientId }: Props) {
                   <div style={mutedText}>Payment: {submittedOrder.payment_status || "Pending"}</div>
                   <div style={mutedText}>Method: {submittedOrder.payment_method || paymentMethod || paymentProvider}</div>
                   <div style={mutedText}>Reference: {submittedOrder.payment_reference || "Awaiting buyer update"}</div>
+                  <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                    <button
+                      type="button"
+                      onClick={() => openMonitorOrder(submittedOrder)}
+                      style={ghostButton}
+                    >
+                      Open in Message Monitor
+                    </button>
+                  </div>
                   {submittedOrder.payment_proof_name || submittedOrder.payment_proof_url || submittedOrder.payment_proof_data_url ? (
                     <div style={detailCard}>
                       <div style={detailTitle}>Payment Proof</div>
@@ -1301,6 +1359,27 @@ export default function BuyerPortalPage({ clientId: propClientId }: Props) {
                         <span style={{ ...statusPill, ...statusColor(order.status) }}>{order.status || "NEW"}</span>
                       </div>
                       <div style={mutedText}>{order.payment_status || "Payment pending"}</div>
+                      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginTop: 10 }}>
+                        <div style={mutedSmall}>
+                          {order.environment ? `Environment: ${order.environment}` : `Environment: ${storefrontEnvironmentLabel}`}
+                        </div>
+                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                          <button
+                            type="button"
+                            onClick={() => void openOrderDetails(order.po_id)}
+                            style={ghostButton}
+                          >
+                            View details
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => openMonitorOrder(order)}
+                            style={ghostButton}
+                          >
+                            Open in Monitor
+                          </button>
+                        </div>
+                      </div>
                     </div>
                   ))}
                 </div>

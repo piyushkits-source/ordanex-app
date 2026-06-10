@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import React from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   FaFileCsv,
   FaFileExcel,
@@ -70,10 +71,14 @@ const API_BASE = "";
 
 export default function MessageMonitorPage() {
   const { scope, setEnvironmentScope } = useAppScope();
+  const [searchParams] = useSearchParams();
+  const initialPoId = searchParams.get("po_id") || "";
+  const initialClientId = searchParams.get("client_id") || "";
+  const initialEnvironment = (searchParams.get("environment") || "").toUpperCase();
   const [rows, setRows] = useState<MonitorRow[]>([]);
   const [loading, setLoading] = useState(false);
 
-  const [environment, setEnvironment] = useState(scope.environment || "PROD");
+  const [environment, setEnvironment] = useState(initialEnvironment || scope.environment || "PROD");
   const [direction, setDirection] = useState("ALL");
   const [statusFilter, setStatusFilter] = useState("ALL");
   const [search, setSearch] = useState("");
@@ -168,6 +173,11 @@ export default function MessageMonitorPage() {
       });
       if (scope.clientId) {
         params.set("client_id", scope.clientId);
+      } else if (initialClientId) {
+        params.set("client_id", initialClientId);
+      }
+      if (initialPoId) {
+        params.set("po_id", initialPoId);
       }
       console.log("statusFilter sent =", statusFilter);
       const res = await fetch(`${API_BASE}/monitoring/queue?${params.toString()}`, {
@@ -185,15 +195,31 @@ export default function MessageMonitorPage() {
       isRefreshingRef.current = false;
       setLoading(false);
     }
-  }, [direction, environment, fromDate, scope.clientId, search, statusFilter, toDate]);
+  }, [direction, environment, fromDate, initialClientId, initialPoId, scope.clientId, search, statusFilter, toDate]);
 
   useEffect(() => {
-    setEnvironment(scope.environment || "PROD");
-  }, [scope.environment]);
+    setEnvironment(initialEnvironment || scope.environment || "PROD");
+  }, [initialEnvironment, scope.environment]);
+
+  useEffect(() => {
+    if (!initialPoId) return;
+    setExpandedRowId(initialPoId);
+  }, [initialPoId]);
 
   useEffect(() => {
     loadQueue();
   }, [loadQueue]);
+
+  useEffect(() => {
+    if (!initialPoId) return;
+    const matched = rows.find((row) => row.po_id === initialPoId);
+    if (!matched) return;
+    setExpandedRowId(initialPoId);
+    void Promise.all([
+      loadActivityLogs(initialPoId),
+      loadProcessingFlow(initialPoId),
+    ]);
+  }, [initialPoId, rows]);
 
   useEffect(() => {
     const intervalId = window.setInterval(() => {

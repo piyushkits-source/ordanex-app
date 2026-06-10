@@ -12,7 +12,7 @@ import {
 } from "react-icons/fa";
 import { clearAuth, getAuth } from "../../utils/auth";
 import { canAccessModule, type AppModuleKey } from "../../utils/access";
-import { getFrontendEnvironmentLabel, workspaceEnvironmentBadge } from "../../utils/environment";
+import { buildStorefrontPath, getFrontendEnvironmentLabel, workspaceEnvironmentBadge } from "../../utils/environment";
 import { useAppScope } from "../../context/AppScopeContext";
 
 const menuItems = [
@@ -33,8 +33,9 @@ export default function UserMenu() {
   const { scope } = useAppScope();
   const environment = scope.environment ? workspaceEnvironmentBadge(scope.environment) : getFrontendEnvironmentLabel();
   const activeClientId = auth?.client_id || scope.clientId;
-  const storefrontPath =
-    activeClientId && canAccessModule(auth, "buyer_storefront") ? `/portal/${activeClientId}` : "";
+  const storefrontPath = canAccessModule(auth, "buyer_storefront")
+    ? buildStorefrontPath(activeClientId, scope.environment || environment)
+    : "";
 
   useEffect(() => {
     const close = (event: MouseEvent) => {

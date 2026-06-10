@@ -163,6 +163,7 @@ class MonitoringService:
         direction: str | None = None,
         status_filter: str | None = None,
         client_id: str | None = None,
+        po_id: str | None = None,
         search: str | None = None,
         from_date: str | None = None,
         to_date: str | None = None,
@@ -190,6 +191,9 @@ class MonitoringService:
 
         if client_id:
             query = query.filter(models.PurchaseOrder.client_id == client_id)
+
+        if po_id:
+            query = query.filter(models.PurchaseOrder.po_id == po_id)
 
         if search:
             s = f"%{search.lower()}%"
