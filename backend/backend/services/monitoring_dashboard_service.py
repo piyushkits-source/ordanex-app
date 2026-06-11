@@ -10,6 +10,14 @@ FAILED_STATUSES = {"ERROR", "FAILED", "DELIVERY_FAILED", "BLOCKED"}
 PENDING_STATUSES = {"PENDING", "NEW", "PARSED", "CORRECTED", "PROCESSING", "REPROCESSING"}
 
 
+
+def _normalize_environment(value: str | None) -> str:
+    raw = str(value or "").strip().lower()
+    if raw in {"prod", "production"}:
+        return "production"
+    return "staging"
+
+
 def _classify_status(status: str) -> str:
     if status in SUCCESS_STATUSES:
         return "success"
@@ -37,7 +45,7 @@ def get_monitoring_summary(
     vertical_id: str | None = None,
     partner_id: str | None = None,
 ) -> dict:
-    env = (environment or current_environment()).upper()
+    env = _normalize_environment(environment or current_environment())
     rows = db.query(models.PurchaseOrder).all()
 
     partner_rows = db.query(models.TradingPartner).all()
@@ -71,7 +79,7 @@ def get_monitoring_summary(
 
     filtered = []
     for row in rows:
-        row_env = (getattr(row, "environment", None) or "STAGING").upper()
+        row_env = _normalize_environment(getattr(row, "environment", None))
         if row_env == env:
             if selected_client and str(getattr(row, "client_id", None) or "") != selected_client:
                 continue
@@ -178,7 +186,7 @@ def get_monitoring_summary(
     )
 
     return {
-        "environment": env,
+        "environment": env.upper(),
         "client_id": selected_client,
         "vertical_id": selected_vertical,
         "partner_id": str(selected_partner.partner_id) if selected_partner else None,

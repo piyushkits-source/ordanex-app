@@ -56,11 +56,11 @@ export async function apiFetch(url: string, options: ApiOptions = {}) {
       headers: getAuthHeaders(headers),
     });
   } catch (error) {
-    if (!skipAuthRedirect && getAccessToken()) {
-      redirectToLogin();
-      throw new Error("Backend disconnected. Please sign in again.");
-    }
-    throw error;
+    const message =
+      error instanceof Error && error.message
+        ? error.message
+        : "Unable to reach the backend. Please refresh and try again.";
+    throw new Error(message);
   }
 
   if (response.status === 401 && !skipAuthRedirect) {

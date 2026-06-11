@@ -3,6 +3,7 @@ import { FaDownload, FaFileCsv, FaRotateRight } from "react-icons/fa6";
 import PageHeader from "../components/common/PageHeader";
 import { apiFetch, parseApiError } from "../utils/api";
 import { getAuth } from "../utils/auth";
+import { storefrontEnvironmentSlug } from "../utils/environment";
 
 type SummaryPoint = {
   label: string;
@@ -122,7 +123,7 @@ export default function ReportsPage() {
     setLoading(true);
     setError(null);
     try {
-      const params = new URLSearchParams({ environment });
+      const params = new URLSearchParams({ environment: storefrontEnvironmentSlug(environment) });
       if (selectedClientId) params.set("client_id", selectedClientId);
       if (selectedVerticalId) params.set("vertical_id", selectedVerticalId);
       if (selectedPartnerId) params.set("partner_id", selectedPartnerId);
