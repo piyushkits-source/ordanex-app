@@ -997,12 +997,42 @@ class BuyerPortalService:
             return True
         return wanted in str(actual or "").strip().lower()
 
-    def _resolve_order_commercial_snapshot(
+    def _matching_charge_rules(
         self,
-        db: Session,
-        payload: schemas.BuyerPortalOrderCreate,
+        settings: dict[str, Any],
+        *,
+        buyer_email: str | None,
+        sku: str | None,
+        category: str | None,
+        ship_to: str | None,
+        sold_to: str | None,
+        ship_to_address: str | None,
+    ) -> list[Any]:
+        return [
+            rule for rule in settings["charge_rules"]
+            if self._text_matches(rule.buyer_email, buyer_email)
+            and self._text_matches(rule.sku, sku)
+            and self._text_matches(rule.category, category)
+            and self._text_matches(rule.ship_to_code, ship_to)
+            and self._text_matches(rule.sold_to_code, sold_to)
+            and self._text_matches(rule.postal_code, ship_to_address)
+            and self._text_matches(rule.country, ship_to_address)
+            and self._text_matches(rule.state, ship_to_address)
+        ]
+
+    def _resolve_catalog_item_commercial(
+        self,
+        *,
+        settings: dict[str, Any],
+        active_buyer_term: Any,
+        item: Any,
+        buyer_email: str | None,
+        company_name: str | None,
+        sold_to: str | None,
+        ship_to: str | None,
+        ship_to_address: str | None,
+        quantity: float = 1.0,
     ) -> dict[str, Any]:
-        settings = self._commercial_settings(db, payload.client_id, payload.environment)
         source_mode = settings["source_mode"]
         charge_codes = {
             str(row.charge_code or "").strip().upper(): row
@@ -1014,6 +1044,126 @@ class BuyerPortalService:
             for row in settings["product_mapping"]
             if str(row.sku or "").strip()
         }
+        item_sku = str(getattr(item, "sku", None) or (item.get("sku") if isinstance(item, dict) else "") or "").strip().upper()
+        product_map = product_maps.get(item_sku)
+        unit_price = float(getattr(item, "unit_price", None) if not isinstance(item, dict) else item.get("unit_price") or 0)
+        item_subtotal = max(0.0, float(quantity or 0) * unit_price)
+        item_category = getattr(item, "category", None) if not isinstance(item, dict) else item.get("category")
+        effective_sold_to = sold_to or company_name
+        rules_for_item = self._matching_charge_rules(
+            settings,
+            buyer_email=buyer_email,
+            sku=item_sku,
+            category=item_category,
+            ship_to=ship_to,
+            sold_to=effective_sold_to,
+            ship_to_address=ship_to_address,
+        )
+
+        defaults_by_type = {
+            "DISCOUNT": getattr(product_map, "default_discount_code", None),
+            "TAX": getattr(product_map, "default_tax_code", None),
+            "FREIGHT": getattr(product_map, "default_freight_code", None),
+            "OCTROI": getattr(product_map, "default_octroi_code", None),
+            "SHIPPING": getattr(product_map, "default_shipping_code", None),
+        }
+
+        def fallback_value(field: str):
+            if isinstance(item, dict):
+                return item.get(field)
+            return getattr(item, field, None)
+
+        def resolve_component(charge_type: str, base_amount: float) -> dict[str, Any]:
+            selected_code = defaults_by_type.get(charge_type)
+            selected_mode = None
+            selected_value = None
+
+            for rule in rules_for_item:
+                code_row = charge_codes.get(str(rule.charge_code or "").strip().upper())
+                if not code_row or str(code_row.charge_type or "").strip().upper() != charge_type:
+                    continue
+                selected_code = code_row.charge_code
+                selected_mode = code_row.mode
+                if str(rule.override_mode or "DEFAULT").strip().upper() == "OVERRIDE":
+                    selected_value = rule.override_value if rule.override_value is not None else code_row.default_value
+                else:
+                    selected_value = code_row.default_value
+                break
+
+            if not selected_code and defaults_by_type.get(charge_type):
+                code_row = charge_codes.get(str(defaults_by_type[charge_type] or "").strip().upper())
+                if code_row:
+                    selected_code = code_row.charge_code
+                    selected_mode = code_row.mode
+                    selected_value = code_row.default_value
+
+            if selected_code:
+                return {
+                    "code": selected_code,
+                    "mode": selected_mode,
+                    "value": selected_value,
+                    "amount": self._charge_amount(base_amount, selected_mode, selected_value),
+                }
+
+            if source_mode != "ERP_MASTER":
+                mode = fallback_value(f"{charge_type.lower()}_mode")
+                value = fallback_value(f"{charge_type.lower()}_value")
+                return {
+                    "code": None,
+                    "mode": mode,
+                    "value": value,
+                    "amount": self._charge_amount(base_amount, mode, value),
+                }
+
+            return {
+                "code": None,
+                "mode": "NONE",
+                "value": None,
+                "amount": 0.0,
+            }
+
+        discount = resolve_component("DISCOUNT", item_subtotal)
+        taxable_base = max(0.0, item_subtotal - float(discount["amount"] or 0))
+        tax = resolve_component("TAX", taxable_base)
+        freight = resolve_component("FREIGHT", taxable_base)
+        octroi = resolve_component("OCTROI", taxable_base)
+        shipping = resolve_component("SHIPPING", taxable_base)
+
+        return {
+            "commercial_source_mode": source_mode,
+            "resolved_discount_code": discount["code"] or getattr(active_buyer_term, "discount_code", None),
+            "resolved_tax_code": tax["code"],
+            "resolved_freight_code": freight["code"],
+            "resolved_octroi_code": octroi["code"],
+            "resolved_shipping_code": shipping["code"],
+            "resolved_payment_terms": getattr(active_buyer_term, "payment_terms", None) or fallback_value("payment_terms"),
+            "discount_mode": str(discount["mode"] or "NONE").strip().upper() or "NONE",
+            "discount_value": float(discount["value"]) if discount["value"] not in (None, "") else None,
+            "tax_mode": str(tax["mode"] or "NONE").strip().upper() or "NONE",
+            "tax_value": float(tax["value"]) if tax["value"] not in (None, "") else None,
+            "freight_mode": str(freight["mode"] or "NONE").strip().upper() or "NONE",
+            "freight_value": float(freight["value"]) if freight["value"] not in (None, "") else None,
+            "octroi_mode": str(octroi["mode"] or "NONE").strip().upper() or "NONE",
+            "octroi_value": float(octroi["value"]) if octroi["value"] not in (None, "") else None,
+            "shipping_mode": str(shipping["mode"] or "NONE").strip().upper() or "NONE",
+            "shipping_value": float(shipping["value"]) if shipping["value"] not in (None, "") else None,
+            "subtotal_amount": item_subtotal,
+            "discount_amount": float(discount["amount"] or 0),
+            "taxable_amount": taxable_base,
+            "tax_amount": float(tax["amount"] or 0),
+            "freight_amount": float(freight["amount"] or 0),
+            "octroi_amount": float(octroi["amount"] or 0),
+            "shipping_amount": float(shipping["amount"] or 0),
+            "total_amount": taxable_base + float(tax["amount"] or 0) + float(freight["amount"] or 0) + float(octroi["amount"] or 0) + float(shipping["amount"] or 0),
+        }
+
+    def _resolve_order_commercial_snapshot(
+        self,
+        db: Session,
+        payload: schemas.BuyerPortalOrderCreate,
+    ) -> dict[str, Any]:
+        settings = self._commercial_settings(db, payload.client_id, payload.environment)
+        source_mode = settings["source_mode"]
         buyer_terms = {
             self._normalize_email(row.buyer_email): row
             for row in settings["buyer_terms"]
@@ -1036,82 +1186,29 @@ class BuyerPortalService:
         }
 
         for item in payload.items:
-            item_subtotal = float(item.quantity or 0) * float(item.unit_price or 0)
-            subtotal += item_subtotal
-            product_map = product_maps.get(str(item.sku or "").strip().upper())
+            effective = self._resolve_catalog_item_commercial(
+                settings=settings,
+                active_buyer_term=active_buyer_term,
+                item=item,
+                buyer_email=payload.buyer_email,
+                company_name=payload.company_name,
+                sold_to=payload.sold_to or payload.company_name or payload.buyer_name,
+                ship_to=payload.ship_to,
+                ship_to_address=payload.ship_to_address,
+                quantity=float(item.quantity or 0),
+            )
 
-            defaults_by_type = {
-                "DISCOUNT": getattr(product_map, "default_discount_code", None),
-                "TAX": getattr(product_map, "default_tax_code", None),
-                "FREIGHT": getattr(product_map, "default_freight_code", None),
-                "OCTROI": getattr(product_map, "default_octroi_code", None),
-                "SHIPPING": getattr(product_map, "default_shipping_code", None),
-            }
-
-            rules_for_item = [
-                rule for rule in settings["charge_rules"]
-                if self._text_matches(rule.buyer_email, payload.buyer_email)
-                and self._text_matches(rule.sku, item.sku)
-                and self._text_matches(rule.category, None)
-                and self._text_matches(rule.ship_to_code, payload.ship_to)
-                and self._text_matches(rule.sold_to_code, payload.sold_to or payload.company_name or payload.buyer_name)
-                and self._text_matches(rule.postal_code, payload.ship_to_address)
-                and self._text_matches(rule.country, payload.ship_to_address)
-                and self._text_matches(rule.state, payload.ship_to_address)
-            ]
-
-            def resolve_component(charge_type: str, item_mode: Any, item_value: Any) -> tuple[str | None, float]:
-                selected_code = defaults_by_type.get(charge_type)
-                selected_mode = None
-                selected_value = None
-
-                for rule in rules_for_item:
-                    code_row = charge_codes.get(str(rule.charge_code or "").strip().upper())
-                    if not code_row or str(code_row.charge_type or "").strip().upper() != charge_type:
-                        continue
-                    selected_code = code_row.charge_code
-                    if str(rule.override_mode or "DEFAULT").strip().upper() == "OVERRIDE":
-                        selected_mode = code_row.mode
-                        selected_value = rule.override_value if rule.override_value is not None else code_row.default_value
-                    else:
-                        selected_mode = code_row.mode
-                        selected_value = code_row.default_value
-                    break
-
-                if not selected_code and defaults_by_type.get(charge_type):
-                    code_row = charge_codes.get(str(defaults_by_type[charge_type] or "").strip().upper())
-                    if code_row:
-                        selected_code = code_row.charge_code
-                        selected_mode = code_row.mode
-                        selected_value = code_row.default_value
-
-                if selected_code:
-                    resolved_codes[f"{charge_type.lower()}_code"] = selected_code
-                    return selected_code, self._charge_amount(item_subtotal, selected_mode, selected_value)
-
-                if source_mode != "ERP_MASTER":
-                    return None, self._charge_amount(item_subtotal, item_mode, item_value)
-
-                return None, 0.0
-
-            discount_code, discount_amount = resolve_component("DISCOUNT", item.discount_mode, item.discount_value)
-            taxable_base = max(0.0, item_subtotal - discount_amount)
-            tax_code, tax_amount = resolve_component("TAX", item.tax_mode, item.tax_value)
-            freight_code, freight_amount = resolve_component("FREIGHT", item.freight_mode, item.freight_value)
-            octroi_code, octroi_amount = resolve_component("OCTROI", item.octroi_mode, item.octroi_value)
-            shipping_code, shipping_amount = resolve_component("SHIPPING", item.shipping_mode, item.shipping_value)
-
-            resolved_codes["discount_code"] = resolved_codes["discount_code"] or discount_code
-            resolved_codes["tax_code"] = resolved_codes["tax_code"] or tax_code
-            resolved_codes["freight_code"] = resolved_codes["freight_code"] or freight_code
-            resolved_codes["octroi_code"] = resolved_codes["octroi_code"] or octroi_code
-            resolved_codes["shipping_code"] = resolved_codes["shipping_code"] or shipping_code
-
-            discount_total += discount_amount
-            tax_total += self._charge_amount(taxable_base, "AMOUNT", tax_amount)
-            freight_total += freight_amount
-            octroi_total += octroi_amount
-            shipping_total += shipping_amount
+            subtotal += float(effective["subtotal_amount"] or 0)
+            discount_total += float(effective["discount_amount"] or 0)
+            tax_total += float(effective["tax_amount"] or 0)
+            freight_total += float(effective["freight_amount"] or 0)
+            octroi_total += float(effective["octroi_amount"] or 0)
+            shipping_total += float(effective["shipping_amount"] or 0)
+            resolved_codes["discount_code"] = resolved_codes["discount_code"] or effective.get("resolved_discount_code")
+            resolved_codes["tax_code"] = resolved_codes["tax_code"] or effective.get("resolved_tax_code")
+            resolved_codes["freight_code"] = resolved_codes["freight_code"] or effective.get("resolved_freight_code")
+            resolved_codes["octroi_code"] = resolved_codes["octroi_code"] or effective.get("resolved_octroi_code")
+            resolved_codes["shipping_code"] = resolved_codes["shipping_code"] or effective.get("resolved_shipping_code")
 
         taxable_amount = max(0.0, subtotal - discount_total)
         total_amount = taxable_amount + tax_total + freight_total + octroi_total + shipping_total
@@ -1137,6 +1234,59 @@ class BuyerPortalService:
             "sync_version": settings["erp_sync_frequency"],
             "payment_terms": getattr(active_buyer_term, "payment_terms", None),
         }
+
+    def preview_catalog_pricing(
+        self,
+        db: Session,
+        payload: schemas.BuyerPortalPricingPreviewRequest,
+    ) -> list[dict[str, Any]]:
+        self.assert_buyer_authorized(db, payload.client_id, payload.buyer_email, payload.environment)
+        settings = self._commercial_settings(db, payload.client_id, payload.environment)
+        buyer_terms = {
+            self._normalize_email(row.buyer_email): row
+            for row in settings["buyer_terms"]
+            if self._normalize_email(row.buyer_email)
+        }
+        active_buyer_term = buyer_terms.get(self._normalize_email(payload.buyer_email))
+
+        preview_rows: list[dict[str, Any]] = []
+        for item in payload.items:
+            base = item.model_dump(mode="json") if hasattr(item, "model_dump") else dict(item)
+            effective = self._resolve_catalog_item_commercial(
+                settings=settings,
+                active_buyer_term=active_buyer_term,
+                item=base,
+                buyer_email=payload.buyer_email,
+                company_name=payload.company_name,
+                sold_to=payload.sold_to or payload.company_name,
+                ship_to=payload.ship_to,
+                ship_to_address=payload.ship_to_address,
+                quantity=max(1.0, float(base.get("min_order_qty") or 1.0)),
+            )
+            preview_rows.append(
+                {
+                    **base,
+                    "payment_terms": effective.get("resolved_payment_terms") or base.get("payment_terms"),
+                    "commercial_source_mode": effective.get("commercial_source_mode"),
+                    "resolved_discount_code": effective.get("resolved_discount_code"),
+                    "resolved_tax_code": effective.get("resolved_tax_code"),
+                    "resolved_freight_code": effective.get("resolved_freight_code"),
+                    "resolved_octroi_code": effective.get("resolved_octroi_code"),
+                    "resolved_shipping_code": effective.get("resolved_shipping_code"),
+                    "discount_mode": effective.get("discount_mode"),
+                    "discount_value": effective.get("discount_value"),
+                    "tax_mode": effective.get("tax_mode"),
+                    "tax_value": effective.get("tax_value"),
+                    "freight_mode": effective.get("freight_mode"),
+                    "freight_value": effective.get("freight_value"),
+                    "octroi_mode": effective.get("octroi_mode"),
+                    "octroi_value": effective.get("octroi_value"),
+                    "shipping_mode": effective.get("shipping_mode"),
+                    "shipping_value": effective.get("shipping_value"),
+                }
+            )
+
+        return preview_rows
 
     def _normalize_invoice_payload(self, value: Any) -> dict[str, Any] | None:
         if not isinstance(value, dict):

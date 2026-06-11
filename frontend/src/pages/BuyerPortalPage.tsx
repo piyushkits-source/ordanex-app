@@ -6,6 +6,7 @@ import {
   fetchBuyerOrder,
   fetchBuyerOrders,
   fetchBuyerPortalSettings,
+  previewBuyerPricing,
   submitBuyerOrder,
   type BuyerPortalCatalogItem,
   type BuyerPortalChargeRule,
@@ -346,6 +347,7 @@ export default function BuyerPortalPage({ clientId: propClientId }: Props) {
   const [recentOrders, setRecentOrders] = useState<BuyerPortalOrder[]>([]);
   const [submittedOrder, setSubmittedOrder] = useState<BuyerPortalOrder | null>(null);
   const [portalSettings, setPortalSettings] = useState<BuyerPortalSettings | null>(null);
+  const [commercialPreviewCatalog, setCommercialPreviewCatalog] = useState<BuyerPortalCatalogItem[] | null>(null);
   const [activeMediaBySku, setActiveMediaBySku] = useState<Record<string, number>>({});
   const [galleryProduct, setGalleryProduct] = useState<BuyerPortalCatalogItem | null>(null);
   const [galleryIndex, setGalleryIndex] = useState(0);
@@ -417,10 +419,49 @@ export default function BuyerPortalPage({ clientId: propClientId }: Props) {
     [approvedBuyerEmail, buyerEmail, companyName, buyerName, shipTo, shipToAddress],
   );
 
-  const pricedCatalog = useMemo(
-    () => catalog.map((item) => applyCheckoutPricing(item, pricingSettingsForCheckout, pricingContext)),
-    [catalog, pricingSettingsForCheckout, pricingContext],
-  );
+  useEffect(() => {
+    if (!clientId || !approvedBuyerEmail || !catalog.length) {
+      setCommercialPreviewCatalog(null);
+      return;
+    }
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      void previewBuyerPricing({
+        client_id: clientId,
+        environment: storefrontEnvironment,
+        buyer_email: approvedBuyerEmail,
+        company_name: companyName || undefined,
+        sold_to: companyName || buyerName || undefined,
+        ship_to: shipTo || undefined,
+        ship_to_address: shipToAddress || undefined,
+        currency,
+        items: catalog,
+      })
+        .then((rows) => {
+          if (!cancelled) {
+            setCommercialPreviewCatalog(Array.isArray(rows) ? rows : []);
+          }
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setCommercialPreviewCatalog(null);
+          }
+        });
+    }, 250);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [approvedBuyerEmail, buyerName, catalog, clientId, companyName, currency, shipTo, shipToAddress, storefrontEnvironment]);
+
+  const pricedCatalog = useMemo(() => {
+    if (commercialPreviewCatalog && commercialPreviewCatalog.length) {
+      const previewMap = new Map(commercialPreviewCatalog.map((item) => [item.sku, item]));
+      return catalog.map((item) => previewMap.get(item.sku) || item);
+    }
+    return catalog.map((item) => applyCheckoutPricing(item, pricingSettingsForCheckout, pricingContext));
+  }, [catalog, commercialPreviewCatalog, pricingSettingsForCheckout, pricingContext]);
 
   const categories = useMemo(
     () => ["All", ...Array.from(new Set(pricedCatalog.map((item) => item.category).filter(Boolean) as string[]))],
@@ -441,13 +482,21 @@ export default function BuyerPortalPage({ clientId: propClientId }: Props) {
   }, [pricedCatalog, search, category]);
 
   useEffect(() => {
+    const currentCatalog = commercialPreviewCatalog && commercialPreviewCatalog.length
+      ? commercialPreviewCatalog
+      : catalog.map((item) => applyCheckoutPricing(item, pricingSettingsForCheckout, pricingContext));
+    const currentCatalogMap = new Map(currentCatalog.map((item) => [item.sku, item]));
     setCart((current) =>
-      current.map((line) => ({
-        ...applyCheckoutPricing(line, pricingSettingsForCheckout, pricingContext),
-        quantity: line.quantity,
-      })),
+      current.map((line) => {
+        const resolved = currentCatalogMap.get(line.sku);
+        if (!resolved) return line;
+        return {
+          ...resolved,
+          quantity: line.quantity,
+        };
+      }),
     );
-  }, [pricingSettingsForCheckout, pricingContext]);
+  }, [catalog, commercialPreviewCatalog, pricingSettingsForCheckout, pricingContext]);
 
   const cartPricing = useMemo(
     () =>

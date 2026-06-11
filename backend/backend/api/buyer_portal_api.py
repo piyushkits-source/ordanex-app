@@ -38,6 +38,14 @@ def submit_order(
     return buyer_portal_service.get_order(db, po.po_id)
 
 
+@router.post("/pricing-preview", response_model=list[schemas.BuyerPortalCatalogItem])
+def pricing_preview(
+    payload: schemas.BuyerPortalPricingPreviewRequest,
+    db: Session = Depends(get_db),
+):
+    return buyer_portal_service.preview_catalog_pricing(db, payload)
+
+
 @router.get("/orders", response_model=list[schemas.BuyerPortalOrderRead])
 def list_orders(
     client_id: str = Query(...),

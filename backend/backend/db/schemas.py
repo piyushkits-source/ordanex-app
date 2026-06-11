@@ -614,6 +614,13 @@ class BuyerPortalCatalogItem(BaseModel):
     shipping_value: float | None = None
     supplier_name: str | None = None
     specifications: dict[str, str] | None = None
+    commercial_source_mode: str | None = None
+    resolved_discount_code: str | None = None
+    resolved_tax_code: str | None = None
+    resolved_freight_code: str | None = None
+    resolved_octroi_code: str | None = None
+    resolved_shipping_code: str | None = None
+    resolved_payment_terms: str | None = None
 
 
 class BuyerPortalOrderItem(BaseModel):
@@ -655,6 +662,18 @@ class BuyerPortalOrderCreate(BaseModel):
     payment_proof_storage_key: str | None = None
     payment_proof_data_url: str | None = None
     items: list[BuyerPortalOrderItem] = Field(default_factory=list)
+
+
+class BuyerPortalPricingPreviewRequest(BaseModel):
+    client_id: str
+    environment: str | None = None
+    buyer_email: str
+    company_name: str | None = None
+    sold_to: str | None = None
+    ship_to: str | None = None
+    ship_to_address: str | None = None
+    currency: str | None = None
+    items: list[BuyerPortalCatalogItem] = Field(default_factory=list)
 
 
 class BuyerPortalInvoiceDetails(BaseModel):

@@ -37,6 +37,13 @@ export interface BuyerPortalCatalogItem {
   shipping_value?: number | null;
   supplier_name?: string | null;
   specifications?: Record<string, string> | null;
+  commercial_source_mode?: string | null;
+  resolved_discount_code?: string | null;
+  resolved_tax_code?: string | null;
+  resolved_freight_code?: string | null;
+  resolved_octroi_code?: string | null;
+  resolved_shipping_code?: string | null;
+  resolved_payment_terms?: string | null;
 }
 
 export interface BuyerPortalOrderItem {
@@ -154,6 +161,18 @@ export interface BuyerPortalOrderCreate {
   payment_proof_storage_key?: string | null;
   payment_proof_data_url?: string | null;
   items: BuyerPortalOrderItem[];
+}
+
+export interface BuyerPortalPricingPreviewRequest {
+  client_id: string;
+  environment?: string | null;
+  buyer_email: string;
+  company_name?: string | null;
+  sold_to?: string | null;
+  ship_to?: string | null;
+  ship_to_address?: string | null;
+  currency?: string | null;
+  items: BuyerPortalCatalogItem[];
 }
 
 export interface BuyerPortalTrackingStep {
@@ -280,6 +299,11 @@ export async function fetchBuyerOrders(clientId: string, buyerEmail?: string, en
 export async function submitBuyerOrder(payload: BuyerPortalOrderCreate) {
   const { data } = await apiClient.post("/buyer-portal/orders", payload);
   return data as BuyerPortalOrder;
+}
+
+export async function previewBuyerPricing(payload: BuyerPortalPricingPreviewRequest) {
+  const { data } = await apiClient.post("/buyer-portal/pricing-preview", payload);
+  return data as BuyerPortalCatalogItem[];
 }
 
 export async function fetchBuyerOrder(poId: string) {
