@@ -4,6 +4,7 @@ import PageHeader from "../components/common/PageHeader";
 import { apiFetch, parseApiError } from "../utils/api";
 import { getAuth } from "../utils/auth";
 import { storefrontEnvironmentSlug } from "../utils/environment";
+import { buildDashboardSummaryFromQueue, type DashboardSummary } from "../utils/monitoringDashboard";
 
 type SummaryPoint = {
   label: string;
@@ -24,18 +25,6 @@ type ExceptionRow = {
   reason?: string | null;
 };
 
-type DashboardSummary = {
-  environment: string;
-  total: number;
-  success: number;
-  failed: number;
-  pending: number;
-  by_connector: Record<string, number>;
-  by_status: Record<string, number>;
-  top_clients: SummaryPoint[];
-  top_suppliers: SummaryPoint[];
-  recent_exceptions: ExceptionRow[];
-};
 
 type FilterOption = {
   client_id?: string;
@@ -123,15 +112,38 @@ export default function ReportsPage() {
     setLoading(true);
     setError(null);
     try {
-      const params = new URLSearchParams({ environment: storefrontEnvironmentSlug(environment) });
-      if (selectedClientId) params.set("client_id", selectedClientId);
-      if (selectedVerticalId) params.set("vertical_id", selectedVerticalId);
-      if (selectedPartnerId) params.set("partner_id", selectedPartnerId);
-      const res = await apiFetch(`/monitoring-dashboard/summary?${params.toString()}`);
-      if (!res.ok) {
-        throw new Error(await parseApiError(res));
+      const dashboardParams = new URLSearchParams({ environment: storefrontEnvironmentSlug(environment) });
+      if (selectedClientId) dashboardParams.set("client_id", selectedClientId);
+      if (selectedVerticalId) dashboardParams.set("vertical_id", selectedVerticalId);
+      if (selectedPartnerId) dashboardParams.set("partner_id", selectedPartnerId);
+
+      try {
+        const res = await apiFetch(`/monitoring-dashboard/summary?${dashboardParams.toString()}`);
+        if (!res.ok) {
+          throw new Error(await parseApiError(res));
+        }
+        setSummary(await res.json());
+        return;
+      } catch (dashboardError) {
+        const queueParams = new URLSearchParams({
+          environment,
+          direction: "ALL",
+          status_filter: "ALL",
+          search: "",
+          fromDate: "",
+          toDate: "",
+        });
+        if (selectedClientId) queueParams.set("client_id", selectedClientId);
+        const fallbackRes = await apiFetch(`/monitoring/queue?${queueParams.toString()}`, {
+          cache: "no-store",
+        });
+        if (!fallbackRes.ok) {
+          throw new Error(await parseApiError(fallbackRes));
+        }
+        const queueRows = await fallbackRes.json();
+        const rows = Array.isArray(queueRows) ? queueRows : queueRows?.items || [];
+        setSummary(buildDashboardSummaryFromQueue(rows, environment));
       }
-      setSummary(await res.json());
     } catch (err: any) {
       setError(err?.message || "Failed to load reports.");
       setSummary(null);
@@ -141,7 +153,9 @@ export default function ReportsPage() {
   }
 
   useEffect(() => {
-    loadFilters().catch((err: any) => setError(err?.message || "Failed to load filters."));
+    loadFilters().catch((err: any) => {
+      console.warn("Dashboard filter load failed", err);
+    });
   }, []);
 
   useEffect(() => {

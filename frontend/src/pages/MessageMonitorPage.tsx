@@ -249,17 +249,13 @@ export default function MessageMonitorPage() {
 
   const counts: Counts = useMemo(() => {
     const total = sortedRows.length;
-    const processed = sortedRows.filter((r) =>
-      ["PROCESSED", "SUCCESS", "DELIVERED", "COMPLETED"].includes((r.status || "").toUpperCase())
-    ).length;
-    const pending = sortedRows.filter((r) =>
-      ["NEW", "PENDING", "ERROR", "FAILED", "CORRECTED", "ORDER_RECEIVED", "PAYMENT_PENDING"].includes(
-        (r.status || "").toUpperCase()
-      )
-    ).length;
-    const errors = sortedRows.filter((r) =>
-      ["ERROR", "FAILED"].includes((r.status || "").toUpperCase())
-    ).length;
+    const successStatuses = ["PROCESSED", "SUCCESS", "DELIVERED", "COMPLETED", "INVOICED", "PAID", "SHIPPED", "REPROCESSED"];
+    const pendingStatuses = ["NEW", "PENDING", "CORRECTED", "ORDER_RECEIVED", "PAYMENT_PENDING", "PARSED", "PROCESSING", "REPROCESSING", "AWAITING_SUPPLIER_INVOICE"];
+    const errorStatuses = ["ERROR", "FAILED", "DELIVERY_FAILED", "BLOCKED", "REJECTED", "CANCELLED"];
+
+    const processed = sortedRows.filter((r) => successStatuses.includes((r.status || "").toUpperCase())).length;
+    const pending = sortedRows.filter((r) => pendingStatuses.includes((r.status || "").toUpperCase())).length;
+    const errors = sortedRows.filter((r) => errorStatuses.includes((r.status || "").toUpperCase())).length;
 
     return { total, processed, pending, errors };
   }, [sortedRows]);
