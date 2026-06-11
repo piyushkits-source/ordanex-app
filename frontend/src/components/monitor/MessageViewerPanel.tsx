@@ -9,6 +9,7 @@ import EmailViewer from "../document/EmailViewer";
 import SpreadsheetViewer from "../document/SpreadsheetViewer";
 import TextViewer from "../document/TextViewer";
 import { formatXml, safeJsonParse } from "../document/utils";
+import { apiFetch, parseApiError } from "../../utils/api";
 
 pdfjs.GlobalWorkerOptions.workerSrc = pdfWorker;
 
@@ -73,6 +74,7 @@ export default function MessageViewerPanel({
   const [hoveredField, setHoveredField] = useState<string | null>(null);
   const [overlayVersion, setOverlayVersion] = useState(0);
   const [structuredTextContent, setStructuredTextContent] = useState(rawText || "");
+  const [downloadMessage, setDownloadMessage] = useState("");
 
   const lowerMime = (mimeType || "").toLowerCase();
   const lowerFileName = (fileName || "").toLowerCase();
@@ -157,6 +159,45 @@ export default function MessageViewerPanel({
 
   const structuredXmlSource = structuredTextContent || rawText || "";
   const xmlTree = useMemo(() => buildXmlTree(structuredXmlSource), [structuredXmlSource]);
+  const portalOrderPreview = useMemo(() => {
+    const parsed = safeJsonParse(structuredTextContent || rawText || "");
+    if (!parsed || Array.isArray(parsed) || typeof parsed !== "object") return null;
+
+    const items = Array.isArray((parsed as any).items) ? (parsed as any).items : [];
+    const hasPortalShape =
+      items.length > 0 &&
+      (
+        "buyer_email" in (parsed as any) ||
+        "company_name" in (parsed as any) ||
+        "client_id" in (parsed as any)
+      );
+
+    if (!hasPortalShape) return null;
+
+    const currency = String((parsed as any).currency || "USD");
+    const subtotal = items.reduce((sum: number, item: any) => {
+      const quantity = Number(item?.quantity || 0);
+      const unitPrice = Number(item?.unit_price || 0);
+      return sum + quantity * unitPrice;
+    }, 0);
+
+    return {
+      documentNumber: String((parsed as any).po_number || (parsed as any).document_number || fileName || "Buyer Portal Order"),
+      documentDate: String((parsed as any).document_date || ""),
+      clientName: String((parsed as any).client_name || (parsed as any).receiver_name || (parsed as any).client_id || ""),
+      buyerCompany: String((parsed as any).company_name || (parsed as any).buyer_name || (parsed as any).buyer_email || ""),
+      buyerEmail: String((parsed as any).buyer_email || ""),
+      soldTo: String((parsed as any).sold_to || ""),
+      shipTo: String((parsed as any).ship_to || ""),
+      shipToAddress: String((parsed as any).ship_to_address || ""),
+      notes: String((parsed as any).notes || ""),
+      paymentMethod: String((parsed as any).payment_method || ""),
+      paymentReference: String((parsed as any).payment_reference || ""),
+      currency,
+      subtotal,
+      items,
+    };
+  }, [fileName, rawText, structuredTextContent]);
   const pdfOptions = useMemo(
     () => ({
       cMapUrl: "https://unpkg.com/pdfjs-dist@5.4.296/cmaps/",
@@ -201,6 +242,53 @@ export default function MessageViewerPanel({
       bodyHtml: htmlBody,
     };
   }, [isEmail, rawText]);
+
+  async function downloadBlob(url: string, fallbackName: string) {
+    const res = await apiFetch(url, { cache: "no-store" });
+    if (!res.ok) {
+      throw new Error(await parseApiError(res));
+    }
+    const blob = await res.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = objectUrl;
+    link.download = fallbackName;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+  }
+
+  function downloadInlineContent(content: string, fallbackName: string, mime = "text/plain") {
+    const blob = new Blob([content], { type: mime });
+    const objectUrl = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = objectUrl;
+    link.download = fallbackName;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+  }
+
+  async function handleViewerDownload() {
+    try {
+      setDownloadMessage("");
+      if (fileUrl) {
+        await downloadBlob(fileUrl, fileName || "document");
+        return;
+      }
+      const content = structuredTextContent || rawText || "";
+      if (!content.trim()) {
+        throw new Error("No document content is available to download.");
+      }
+      const mime = isJson ? "application/json" : isXml ? "application/xml" : "text/plain";
+      const extension = isJson ? "json" : isXml ? "xml" : "txt";
+      downloadInlineContent(content, fileName || `document.${extension}`, mime);
+    } catch (error: any) {
+      setDownloadMessage(error?.message || "Failed to download document.");
+    }
+  }
 
   useEffect(() => {
     let active = true;
@@ -916,29 +1004,27 @@ export default function MessageViewerPanel({
                 Next
               </button>
 
-              <a
-                href={fileUrl || "#"}
-                target="_blank"
-                rel="noreferrer"
+              <button
+                type="button"
+                onClick={() => void handleViewerDownload()}
                 style={{
                   border: "1px solid #dbe4ee",
-                  background: fileUrl ? "#fff" : "#f8fafc",
-                  color: fileUrl ? "#0f172a" : "#94a3b8",
+                  background: "#fff",
+                  color: "#0f172a",
                   borderRadius: 8,
                   padding: "6px 10px",
-                  textDecoration: "none",
                   fontSize: 12,
                   fontWeight: 700,
                   display: "inline-flex",
                   alignItems: "center",
                   gap: 6,
-                  pointerEvents: fileUrl ? "auto" : "none",
+                  cursor: "pointer",
                 }}
                 title="Download Original Document"
               >
                 <FaDownload />
                 Download
-              </a>
+              </button>
             </div>
           </div>
 
@@ -1277,6 +1363,22 @@ export default function MessageViewerPanel({
               background: "#fff",
             }}
           >
+            {downloadMessage ? (
+              <div
+                style={{
+                  marginBottom: 12,
+                  border: "1px solid #fecaca",
+                  background: "#fef2f2",
+                  color: "#b91c1c",
+                  borderRadius: 12,
+                  padding: "10px 12px",
+                  fontSize: 12,
+                  fontWeight: 600,
+                }}
+              >
+                {downloadMessage}
+              </div>
+            ) : null}
             {isSpreadsheet ? (
               <SpreadsheetViewer fileUrl={fileUrl || undefined} rawText={structuredTextContent || rawText || undefined} selectedField={selectedField} onValueSelect={(value) => { if (selectedField) onStructuredValueSelect?.(selectedField, normalizeExtractedValue(selectedField, value)); }} />
             ) : isEdi ? (
@@ -1335,22 +1437,194 @@ export default function MessageViewerPanel({
                 </div>
               </div>
             ) : isJson ? (
-              <pre
-                style={{
-                  whiteSpace: "pre-wrap",
-                  wordBreak: "break-word",
-                  background: "#fff",
-                  border: "1px solid #dbe4ee",
-                  borderRadius: 12,
-                  padding: 14,
-                  margin: 0,
-                }}
-              >
-                {(() => {
-                  const parsed = safeJsonParse(structuredTextContent || rawText || "");
-                  return parsed ? JSON.stringify(parsed, null, 2) : structuredTextContent || rawText || "No JSON content available.";
-                })()}
-              </pre>
+              portalOrderPreview ? (
+                <div style={{ display: "grid", gap: 14 }}>
+                  <div
+                    style={{
+                      border: "1px solid #dbe4ee",
+                      borderRadius: 16,
+                      background: "linear-gradient(180deg, #ffffff 0%, #f8fbff 100%)",
+                      padding: 18,
+                      boxShadow: "0 14px 30px rgba(37, 99, 235, 0.08)",
+                    }}
+                  >
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
+                      <div>
+                        <div style={{ fontSize: 11, fontWeight: 800, color: "#2563eb", letterSpacing: "0.08em" }}>
+                          BUYER PORTAL PURCHASE ORDER
+                        </div>
+                        <div style={{ fontSize: 24, fontWeight: 900, color: "#0f172a", marginTop: 6 }}>
+                          {portalOrderPreview.documentNumber}
+                        </div>
+                        <div style={{ fontSize: 13, color: "#475569", marginTop: 6 }}>
+                          {portalOrderPreview.documentDate || "Document date not provided"}
+                        </div>
+                      </div>
+                      <div
+                        style={{
+                          minWidth: 240,
+                          border: "1px solid #dbe4ee",
+                          borderRadius: 14,
+                          background: "#fff",
+                          padding: 14,
+                          display: "grid",
+                          gap: 8,
+                        }}
+                      >
+                        <PreviewRow label="Buyer company" value={portalOrderPreview.buyerCompany} />
+                        <PreviewRow label="Buyer email" value={portalOrderPreview.buyerEmail} />
+                        <PreviewRow label="Client" value={portalOrderPreview.clientName} />
+                        <PreviewRow label="Payment method" value={portalOrderPreview.paymentMethod} />
+                      </div>
+                    </div>
+
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12, marginTop: 14 }}>
+                      <PreviewCard title="Sold-to" value={portalOrderPreview.soldTo || "-"} />
+                      <PreviewCard title="Ship-to" value={portalOrderPreview.shipTo || "-"} />
+                      <PreviewCard title="Ship-to address" value={portalOrderPreview.shipToAddress || "-"} />
+                      <PreviewCard title="Payment reference" value={portalOrderPreview.paymentReference || "-"} />
+                    </div>
+
+                    {portalOrderPreview.notes ? (
+                      <div
+                        style={{
+                          marginTop: 14,
+                          border: "1px solid #dbe4ee",
+                          borderRadius: 14,
+                          background: "#fff",
+                          padding: 14,
+                        }}
+                      >
+                        <div style={{ fontSize: 12, fontWeight: 800, color: "#2563eb", marginBottom: 6 }}>
+                          BUYER NOTES
+                        </div>
+                        <div style={{ fontSize: 13, color: "#334155", whiteSpace: "pre-wrap" }}>
+                          {portalOrderPreview.notes}
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+
+                  <div
+                    style={{
+                      border: "1px solid #dbe4ee",
+                      borderRadius: 16,
+                      background: "#fff",
+                      overflow: "hidden",
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "96px 1.6fr 0.8fr 0.8fr 0.9fr 1fr",
+                        gap: 0,
+                        background: "#eff6ff",
+                        borderBottom: "1px solid #dbe4ee",
+                      }}
+                    >
+                      {["SKU", "Description", "Qty", "UOM", "Unit price", "Line total"].map((label) => (
+                        <div key={label} style={{ padding: "12px 14px", fontSize: 12, fontWeight: 800, color: "#1d4ed8" }}>
+                          {label}
+                        </div>
+                      ))}
+                    </div>
+                    {portalOrderPreview.items.map((item: any, index: number) => {
+                      const quantity = Number(item?.quantity || 0);
+                      const unitPrice = Number(item?.unit_price || 0);
+                      const lineTotal = quantity * unitPrice;
+                      return (
+                        <div
+                          key={`${item?.sku || item?.name || "item"}-${index}`}
+                          style={{
+                            display: "grid",
+                            gridTemplateColumns: "96px 1.6fr 0.8fr 0.8fr 0.9fr 1fr",
+                            gap: 0,
+                            borderBottom: index === portalOrderPreview.items.length - 1 ? "none" : "1px solid #eef2f7",
+                          }}
+                        >
+                          <div style={tableCell}>{item?.sku || "-"}</div>
+                          <div style={tableCell}>
+                            <div style={{ fontWeight: 700, color: "#0f172a" }}>{item?.name || item?.description || "Product"}</div>
+                            {item?.description && item?.description !== item?.name ? (
+                              <div style={{ fontSize: 12, color: "#64748b", marginTop: 4 }}>{item.description}</div>
+                            ) : null}
+                          </div>
+                          <div style={tableCell}>{item?.quantity ?? "-"}</div>
+                          <div style={tableCell}>{item?.uom || "-"}</div>
+                          <div style={tableCell}>{formatCurrency(unitPrice, portalOrderPreview.currency)}</div>
+                          <div style={tableCell}>{formatCurrency(lineTotal, portalOrderPreview.currency)}</div>
+                        </div>
+                      );
+                    })}
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "flex-end",
+                        padding: 16,
+                        borderTop: "1px solid #dbe4ee",
+                        background: "#f8fbff",
+                      }}
+                    >
+                      <div style={{ minWidth: 240, display: "grid", gap: 8 }}>
+                        <SummaryRow label="Subtotal" value={formatCurrency(portalOrderPreview.subtotal, portalOrderPreview.currency)} />
+                        <SummaryRow label="Currency" value={portalOrderPreview.currency} />
+                      </div>
+                    </div>
+                  </div>
+
+                  <details
+                    style={{
+                      border: "1px solid #dbe4ee",
+                      borderRadius: 12,
+                      background: "#fff",
+                    }}
+                  >
+                    <summary
+                      style={{
+                        cursor: "pointer",
+                        padding: "12px 14px",
+                        fontSize: 12,
+                        fontWeight: 800,
+                        color: "#2563eb",
+                        listStyle: "none",
+                      }}
+                    >
+                      View raw JSON payload
+                    </summary>
+                    <pre
+                      style={{
+                        whiteSpace: "pre-wrap",
+                        wordBreak: "break-word",
+                        borderTop: "1px solid #dbe4ee",
+                        padding: 14,
+                        margin: 0,
+                        color: "#334155",
+                        fontSize: 12,
+                        background: "#f8fafc",
+                      }}
+                    >
+                      {JSON.stringify(safeJsonParse(structuredTextContent || rawText || ""), null, 2)}
+                    </pre>
+                  </details>
+                </div>
+              ) : (
+                <pre
+                  style={{
+                    whiteSpace: "pre-wrap",
+                    wordBreak: "break-word",
+                    background: "#fff",
+                    border: "1px solid #dbe4ee",
+                    borderRadius: 12,
+                    padding: 14,
+                    margin: 0,
+                  }}
+                >
+                  {(() => {
+                    const parsed = safeJsonParse(structuredTextContent || rawText || "");
+                    return parsed ? JSON.stringify(parsed, null, 2) : structuredTextContent || rawText || "No JSON content available.";
+                  })()}
+                </pre>
+              )
             ) : (
               <TextViewer content={structuredTextContent || rawText || "Preview is text-only for this format. Download the original document for the native file view."} />
             )}
@@ -1563,6 +1837,71 @@ function EmailMetaRow({ label, value }: { label: string; value?: string | null }
     <div style={{ display: "grid", gridTemplateColumns: "90px 1fr", gap: 10, alignItems: "start" }}>
       <div style={{ color: "#64748b", fontSize: 12, fontWeight: 700 }}>{label}</div>
       <div style={{ color: "#0f172a", fontSize: 13, wordBreak: "break-word" }}>{value || "-"}</div>
+    </div>
+  );
+}
+
+function formatCurrency(value: number, currency: string) {
+  const safeValue = Number.isFinite(value) ? value : 0;
+  try {
+    return new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: currency || "USD",
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(safeValue);
+  } catch {
+    return `${currency || "USD"} ${safeValue.toFixed(2)}`;
+  }
+}
+
+const tableCell = {
+  padding: "14px",
+  fontSize: 13,
+  color: "#334155",
+  alignSelf: "stretch",
+  display: "flex",
+  alignItems: "center",
+} as const;
+
+function PreviewRow({ label, value }: { label: string; value?: string | null }) {
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "96px 1fr", gap: 10 }}>
+      <div style={{ fontSize: 11, fontWeight: 800, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+        {label}
+      </div>
+      <div style={{ fontSize: 13, fontWeight: 700, color: "#0f172a", wordBreak: "break-word" }}>
+        {value || "-"}
+      </div>
+    </div>
+  );
+}
+
+function PreviewCard({ title, value }: { title: string; value: string }) {
+  return (
+    <div
+      style={{
+        border: "1px solid #dbe4ee",
+        borderRadius: 14,
+        background: "#fff",
+        padding: 14,
+      }}
+    >
+      <div style={{ fontSize: 11, fontWeight: 800, color: "#2563eb", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+        {title}
+      </div>
+      <div style={{ fontSize: 13, color: "#0f172a", marginTop: 8, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+        {value || "-"}
+      </div>
+    </div>
+  );
+}
+
+function SummaryRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+      <div style={{ fontSize: 12, color: "#64748b", fontWeight: 700 }}>{label}</div>
+      <div style={{ fontSize: 13, color: "#0f172a", fontWeight: 800 }}>{value}</div>
     </div>
   );
 }

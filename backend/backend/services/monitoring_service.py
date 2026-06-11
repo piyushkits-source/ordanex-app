@@ -221,7 +221,7 @@ class MonitoringService:
             try:
                 results.append(self._serialize_po(db, row))
             except Exception:
-                results.append(self._serialize_po_fallback(row))
+                results.append(self._serialize_po_fallback(db, row))
 
         if not results and po_id:
             fallback_row = (
@@ -496,12 +496,30 @@ class MonitoringService:
 
 
 
-    def _serialize_po_fallback(self, row: Any) -> dict[str, Any]:
+    def _serialize_po_fallback(self, db: Session, row: Any) -> dict[str, Any]:
         def _safe_iso(dt):
             try:
                 return dt.isoformat() if dt else None
             except Exception:
                 return None
+
+        def _safe_json(value: Any) -> dict[str, Any]:
+            if isinstance(value, dict):
+                return value
+            if isinstance(value, str):
+                text = value.strip()
+                if text.startswith("{") and text.endswith("}"):
+                    try:
+                        parsed = json.loads(text)
+                        if isinstance(parsed, dict):
+                            return parsed
+                    except Exception:
+                        return {}
+            return {}
+
+        def _clean_text(value: Any) -> str | None:
+            text = str(value or "").strip()
+            return text or None
 
         resolved_document_number = (
             getattr(row, "po_number", None)
@@ -520,6 +538,28 @@ class MonitoringService:
             or "PO"
         )
 
+        source_type = str(getattr(row, "source_type", None) or "").upper()
+        portal_payload = _safe_json(getattr(row, "raw_text", None)) if source_type == "BUYER_PORTAL" else {}
+        client_row = (
+            db.query(models.Client)
+            .filter(models.Client.client_id == getattr(row, "client_id", None))
+            .first()
+        )
+        client_name = _clean_text(getattr(client_row, "client_name", None))
+        buyer_display_name = (
+            _clean_text(portal_payload.get("company_name"))
+            or _clean_text(portal_payload.get("buyer_name"))
+            or _clean_text(getattr(row, "sender", None))
+        )
+        receiver_display_name = client_name or _clean_text(getattr(row, "receiver", None))
+        supplier_display_name = (
+            receiver_display_name
+            if source_type == "BUYER_PORTAL"
+            else _clean_text(getattr(row, "supplier_name", None)) or receiver_display_name
+        )
+        file_name = f"{resolved_document_number}.json" if source_type == "BUYER_PORTAL" else None
+        mime_type = "application/json" if source_type == "BUYER_PORTAL" else None
+
         return {
             "po_id": str(getattr(row, "po_id")),
             "file_id": str(getattr(row, "file_id")) if getattr(row, "file_id", None) else None,
@@ -527,10 +567,10 @@ class MonitoringService:
             "po_number": resolved_document_number,
             "document_number": resolved_document_number,
             "docnum": getattr(row, "docnum", None) or resolved_document_number,
-            "supplier_name": getattr(row, "supplier_name", None),
+            "supplier_name": supplier_display_name,
             "status": getattr(row, "status", None),
-            "sender": getattr(row, "sender", None),
-            "receiver": getattr(row, "receiver", None),
+            "sender": buyer_display_name if source_type == "BUYER_PORTAL" else _clean_text(getattr(row, "sender", None)),
+            "receiver": receiver_display_name,
             "direction": self._infer_direction(row),
             "environment": getattr(row, "environment", None),
             "source_type": getattr(row, "source_type", None),
@@ -545,8 +585,8 @@ class MonitoringService:
             "processed_at": _safe_iso(getattr(row, "processed_at", None)),
             "delivered_at": _safe_iso(getattr(row, "delivered_at", None)),
             "file_url": None,
-            "mime_type": None,
-            "file_name": None,
+            "mime_type": mime_type,
+            "file_name": file_name,
             "raw_text": getattr(row, "raw_text", None),
             "xml_payload": getattr(row, "xml_payload", None),
             "items": [],
@@ -652,6 +692,9 @@ class MonitoringService:
             _safe_iso(getattr(row, "po_date", None)),
         )
         client_row = db.query(models.Client).filter(models.Client.client_id == getattr(row, "client_id", None)).first()
+        source_type = str(getattr(row, "source_type", None) or "").upper()
+        portal_payload = _safe_json(getattr(row, "raw_text", None)) if source_type == "BUYER_PORTAL" else {}
+
         def _clean_party_name(value: Any) -> str | None:
             text = str(value or "").strip()
             if not text:
@@ -663,13 +706,22 @@ class MonitoringService:
                 return None
             return text
 
+        client_name = _clean_party_name(getattr(client_row, "client_name", None))
+        portal_buyer_name = (
+            _clean_party_name(portal_payload.get("company_name"))
+            or _clean_party_name(portal_payload.get("buyer_name"))
+            or _clean_party_name(portal_payload.get("buyer_email"))
+        )
+
         resolved_customer_name = mapping_value(
             "customer_name",
-            _clean_party_name(getattr(client_row, "client_name", None)) or _clean_party_name(getattr(row, "receiver", None)),
+            portal_buyer_name if source_type == "BUYER_PORTAL"
+            else client_name or _clean_party_name(getattr(row, "receiver", None)),
         )
         resolved_supplier_name = mapping_value(
             "supplier_name",
-            _clean_party_name(getattr(row, "supplier_name", None))
+            client_name if source_type == "BUYER_PORTAL"
+            else _clean_party_name(getattr(row, "supplier_name", None))
             or _clean_party_name(getattr(row, "partner_name", None))
             or _clean_party_name(getattr(row, "trading_partner_name", None))
             or _clean_party_name(getattr(row, "sender", None)),
@@ -1166,7 +1218,7 @@ class MonitoringService:
                 or resolved_document_number
                 or getattr(row, "docnum", None)
             ),
-            "supplier_name": getattr(row, "supplier_name", None),
+            "supplier_name": resolved_supplier_name,
             "currency": resolved_currency_code,
             "po_type": resolved_document_type,
             "order_type": resolved_order_type,
@@ -1176,8 +1228,8 @@ class MonitoringService:
             "header_details": resolved_header_details,
             "invoice_fields": header_details_json if show_invoice_fields else None,
             "status": getattr(row, "status", None),
-            "sender": getattr(row, "sender", None) or resolved_supplier_name,
-            "receiver": getattr(row, "receiver", None) or resolved_customer_name,
+            "sender": resolved_customer_name if source_type == "BUYER_PORTAL" else (getattr(row, "sender", None) or resolved_supplier_name),
+            "receiver": resolved_supplier_name if source_type == "BUYER_PORTAL" else (getattr(row, "receiver", None) or resolved_customer_name),
             "direction": resolved_business_direction,
             "business_direction": resolved_business_direction,
             "transport_direction": resolved_transport_direction,

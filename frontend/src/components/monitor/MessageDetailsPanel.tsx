@@ -15,6 +15,7 @@ import type {
   ProcessingStep,
 } from "../../types/monitoring";
 import { getAuthHeaders } from "../../utils/auth";
+import { absoluteFileUrl } from "../../api/apiClient";
 import { apiFetch, parseApiError } from "../../utils/api";
 
 type Props = {
@@ -406,16 +407,76 @@ export default function MessageDetailsPanel({
     });
   }
 
-  const handleDownloadXml = () => {
-    window.open(`/purchase-orders/${row.po_id}/download/target`, "_blank");
+  async function downloadBlob(url: string, fallbackName: string) {
+    const res = await apiFetch(url, { cache: "no-store" });
+    if (!res.ok) {
+      throw new Error(await parseApiError(res));
+    }
+    const blob = await res.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = objectUrl;
+    link.download = fallbackName;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+  }
+
+  function downloadTextContent(content: string, fallbackName: string, mime = "application/json") {
+    const blob = new Blob([content], { type: mime });
+    const objectUrl = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = objectUrl;
+    link.download = fallbackName;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+  }
+
+  const handleDownloadXml = async () => {
+    try {
+      await downloadBlob(`/purchase-orders/${row.po_id}/download/target`, `${row.po_number || row.po_id}_target.xml`);
+    } catch (err: any) {
+      setPortalCommerceMessage({
+        type: "error",
+        text: err?.message || "Failed to download target XML.",
+      });
+    }
   };
 
-  const handleDownloadOriginal = () => {
-    if ((row as any).file_url) window.open((row as any).file_url, "_blank");
+  const handleDownloadOriginal = async () => {
+    try {
+      const fileUrl = absoluteFileUrl((row as any).file_url || "");
+      if (fileUrl) {
+        await downloadBlob(fileUrl, (row as any).file_name || `${row.po_number || row.po_id}.dat`);
+        return;
+      }
+      const rawText = String((row as any).raw_text || "");
+      if (rawText.trim()) {
+        const isJson = rawText.trim().startsWith("{") || rawText.trim().startsWith("[");
+        downloadTextContent(rawText, `${row.po_number || row.po_id}.${isJson ? "json" : "txt"}`, isJson ? "application/json" : "text/plain");
+        return;
+      }
+      throw new Error("Original portal document is not available for download yet.");
+    } catch (err: any) {
+      setPortalCommerceMessage({
+        type: "error",
+        text: err?.message || "Failed to download original document.",
+      });
+    }
   };
 
-  const handleDownloadCanonical = () => {
-    window.open(`/purchase-orders/${row.po_id}/download/canonical`, "_blank");
+  const handleDownloadCanonical = async () => {
+    try {
+      await downloadBlob(`/purchase-orders/${row.po_id}/download/canonical`, `${row.po_number || row.po_id}_canonical.json`);
+    } catch (err: any) {
+      setPortalCommerceMessage({
+        type: "error",
+        text: err?.message || "Failed to download canonical payload.",
+      });
+    }
   };
 
   async function submitIssue() {
