@@ -963,7 +963,9 @@ export default function ExpandedMessageRow({
       <div className="expanded-top-strip">
         <div className="expanded-doc-meta">
           <span className="expanded-chip">
-            Document: {(row as any).invoice_number || (row as any).billing_document_number || (row as any).docnum || (row as any).po_number || "-"}
+            Document: {String((row as any).source_type || "").toUpperCase() === "BUYER_PORTAL"
+              ? ((row as any).docnum || (row as any).po_number || "-")
+              : ((row as any).invoice_number || (row as any).billing_document_number || (row as any).docnum || (row as any).po_number || "-")}
           </span>
           <span className="expanded-chip">Customer: {(row as any).sender || "-"}</span>
           <span className="expanded-chip">

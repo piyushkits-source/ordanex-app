@@ -1211,24 +1211,28 @@ class MonitoringService:
             ),
             "docnum": getattr(row, "docnum", None),
             "transaction_id": (
-                next(
-                    (
-                        entry.get("value")
-                        for entry in mappings
-                        if entry.get("key") == "invoice_number" and entry.get("value") not in [None, ""]
-                    ),
-                    None,
+                (getattr(row, "docnum", None) or resolved_document_number)
+                if source_type == "BUYER_PORTAL"
+                else (
+                    next(
+                        (
+                            entry.get("value")
+                            for entry in mappings
+                            if entry.get("key") == "invoice_number" and entry.get("value") not in [None, ""]
+                        ),
+                        None,
+                    )
+                    or next(
+                        (
+                            entry.get("value")
+                            for entry in mappings
+                            if entry.get("key") == "billing_document_number" and entry.get("value") not in [None, ""]
+                        ),
+                        None,
+                    )
+                    or resolved_document_number
+                    or getattr(row, "docnum", None)
                 )
-                or next(
-                    (
-                        entry.get("value")
-                        for entry in mappings
-                        if entry.get("key") == "billing_document_number" and entry.get("value") not in [None, ""]
-                    ),
-                    None,
-                )
-                or resolved_document_number
-                or getattr(row, "docnum", None)
             ),
             "supplier_name": resolved_supplier_name,
             "currency": resolved_currency_code,

@@ -16,6 +16,7 @@ import type {
 } from "../../types/monitoring";
 import { getAuthHeaders } from "../../utils/auth";
 import { absoluteFileUrl } from "../../api/apiClient";
+import { uploadPortalFile } from "../../api/fileStorageApi";
 import { apiFetch, parseApiError } from "../../utils/api";
 
 type Props = {
@@ -85,12 +86,17 @@ export default function MessageDetailsPanel({
     due_date: "",
     payment_status: "",
     invoice_url: "",
+    invoice_file_name: "",
+    invoice_file_data_url: "",
     invoice_notes: "",
     shipment_number: "",
     shipment_status: "",
     carrier: "",
     tracking_number: "",
     tracking_url: "",
+    shipment_document_name: "",
+    shipment_document_url: "",
+    shipment_document_data_url: "",
     ship_date: "",
     estimated_delivery_date: "",
     delivered_date: "",
@@ -225,12 +231,17 @@ export default function MessageDetailsPanel({
           due_date: data?.invoice?.due_date || "",
           payment_status: data?.invoice?.payment_status || data?.payment_status || "",
           invoice_url: data?.invoice?.invoice_url || "",
+          invoice_file_name: data?.invoice?.invoice_file_name || "",
+          invoice_file_data_url: data?.invoice?.invoice_file_data_url || "",
           invoice_notes: data?.invoice?.invoice_notes || "",
           shipment_number: data?.shipment?.shipment_number || "",
           shipment_status: data?.shipment?.shipment_status || data?.dispatch_status || "",
           carrier: data?.shipment?.carrier || "",
           tracking_number: data?.shipment?.tracking_number || "",
           tracking_url: data?.shipment?.tracking_url || "",
+          shipment_document_name: data?.shipment?.shipment_document_name || "",
+          shipment_document_url: data?.shipment?.shipment_document_url || "",
+          shipment_document_data_url: data?.shipment?.shipment_document_data_url || "",
           ship_date: data?.shipment?.ship_date || "",
           estimated_delivery_date: data?.shipment?.estimated_delivery_date || "",
           delivered_date: data?.shipment?.delivered_date || "",
@@ -308,6 +319,58 @@ export default function MessageDetailsPanel({
     setPortalCommerce((prev) => ({ ...prev, [key]: value }));
   }
 
+  async function handlePortalDocumentUpload(
+    file: File | null | undefined,
+    kind: "invoice" | "shipment",
+  ) {
+    if (!file || !row.po_id) return;
+    if (file.size > 6 * 1024 * 1024) {
+      setPortalCommerceMessage({ type: "error", text: "Document is too large. Use a file up to 6MB." });
+      return;
+    }
+    const allowed =
+      file.type === "application/pdf" ||
+      file.type.startsWith("image/") ||
+      /\.(pdf|png|jpe?g|webp)$/i.test(file.name);
+    if (!allowed) {
+      setPortalCommerceMessage({ type: "error", text: "Use PDF or image files for invoice and shipment documents." });
+      return;
+    }
+    try {
+      setPortalCommerceMessage({ type: "success", text: `Uploading ${file.name}...` });
+      const uploaded = await uploadPortalFile({
+        file,
+        clientId: row.client_id || null,
+        orderId: row.po_id || null,
+        scope: kind === "invoice" ? "invoice-document" : "shipment-document",
+      });
+      if (kind === "invoice") {
+        setPortalCommerce((prev) => ({
+          ...prev,
+          invoice_file_name: uploaded.fileName || file.name,
+          invoice_url: uploaded.fileUrl || prev.invoice_url,
+          invoice_file_data_url: uploaded.fileDataUrl || "",
+        }));
+      } else {
+        setPortalCommerce((prev) => ({
+          ...prev,
+          shipment_document_name: uploaded.fileName || file.name,
+          shipment_document_url: uploaded.fileUrl || prev.shipment_document_url,
+          shipment_document_data_url: uploaded.fileDataUrl || "",
+        }));
+      }
+      setPortalCommerceMessage({
+        type: "success",
+        text: `${uploaded.storageMode === "remote" ? "Uploaded" : "Attached"} ${kind === "invoice" ? "invoice" : "shipment"} document: ${uploaded.fileName || file.name}`,
+      });
+    } catch (err: any) {
+      setPortalCommerceMessage({
+        type: "error",
+        text: err?.message || "Failed to upload document.",
+      });
+    }
+  }
+
   async function savePortalCommerce() {
     if (!row.po_id) return;
     try {
@@ -322,6 +385,8 @@ export default function MessageDetailsPanel({
           due_date: portalCommerce.due_date || undefined,
           payment_status: portalCommerce.payment_status || undefined,
           invoice_url: portalCommerce.invoice_url || undefined,
+          invoice_file_name: portalCommerce.invoice_file_name || undefined,
+          invoice_file_data_url: portalCommerce.invoice_file_data_url || undefined,
           invoice_notes: portalCommerce.invoice_notes || undefined,
         },
         shipment: {
@@ -330,6 +395,9 @@ export default function MessageDetailsPanel({
           carrier: portalCommerce.carrier || undefined,
           tracking_number: portalCommerce.tracking_number || undefined,
           tracking_url: portalCommerce.tracking_url || undefined,
+          shipment_document_name: portalCommerce.shipment_document_name || undefined,
+          shipment_document_url: portalCommerce.shipment_document_url || undefined,
+          shipment_document_data_url: portalCommerce.shipment_document_data_url || undefined,
           ship_date: portalCommerce.ship_date || undefined,
           estimated_delivery_date: portalCommerce.estimated_delivery_date || undefined,
           delivered_date: portalCommerce.delivered_date || undefined,
@@ -1166,7 +1234,24 @@ export default function MessageDetailsPanel({
               <input value={portalCommerce.payment_status} onChange={(e) => updatePortalCommerceField("payment_status", e.target.value)} style={inputStyle(false)} placeholder="Invoice issued / Paid / Overdue" />
             </FieldTile>
             <FieldTile label="Invoice URL">
-              <input value={portalCommerce.invoice_url} onChange={(e) => updatePortalCommerceField("invoice_url", e.target.value)} style={inputStyle(false)} placeholder="https://..." />
+              <div>
+                <input value={portalCommerce.invoice_url} onChange={(e) => updatePortalCommerceField("invoice_url", e.target.value)} style={inputStyle(false)} placeholder="/files/<file-id>/download or https://..." />
+                <div style={{ marginTop: 6, fontSize: 11, color: "#64748b", lineHeight: 1.4 }}>
+                  Use an Ordanex file URL like <code>/files/&lt;file-id&gt;/download</code> or a public HTTPS document URL. Local Windows file paths will not work in the live app.
+                </div>
+                <div style={{ marginTop: 10, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                  <label style={uploadActionBtn}>
+                    Upload invoice PDF / image
+                    <input type="file" accept="application/pdf,image/*" hidden onChange={(e) => void handlePortalDocumentUpload(e.target.files?.[0], "invoice")} />
+                  </label>
+                  {portalCommerce.invoice_file_name ? <span style={uploadMetaText}>Attached: {portalCommerce.invoice_file_name}</span> : null}
+                  {(portalCommerce.invoice_url || portalCommerce.invoice_file_data_url) ? (
+                    <a href={absoluteFileUrl(portalCommerce.invoice_url || "") || portalCommerce.invoice_file_data_url || "#"} target="_blank" rel="noreferrer" style={uploadLinkBtn}>
+                      Open invoice document
+                    </a>
+                  ) : null}
+                </div>
+              </div>
             </FieldTile>
             <FieldTile label="Shipment Number">
               <input value={portalCommerce.shipment_number} onChange={(e) => updatePortalCommerceField("shipment_number", e.target.value)} style={inputStyle(false)} />
@@ -1183,7 +1268,21 @@ export default function MessageDetailsPanel({
               <input value={portalCommerce.tracking_number} onChange={(e) => updatePortalCommerceField("tracking_number", e.target.value)} style={inputStyle(false)} />
             </FieldTile>
             <FieldTile label="Tracking URL">
-              <input value={portalCommerce.tracking_url} onChange={(e) => updatePortalCommerceField("tracking_url", e.target.value)} style={inputStyle(false)} placeholder="https://..." />
+              <div>
+                <input value={portalCommerce.tracking_url} onChange={(e) => updatePortalCommerceField("tracking_url", e.target.value)} style={inputStyle(false)} placeholder="https://..." />
+                <div style={{ marginTop: 10, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                  <label style={uploadActionBtn}>
+                    Upload shipment document
+                    <input type="file" accept="application/pdf,image/*" hidden onChange={(e) => void handlePortalDocumentUpload(e.target.files?.[0], "shipment")} />
+                  </label>
+                  {portalCommerce.shipment_document_name ? <span style={uploadMetaText}>Attached: {portalCommerce.shipment_document_name}</span> : null}
+                  {(portalCommerce.shipment_document_url || portalCommerce.shipment_document_data_url) ? (
+                    <a href={absoluteFileUrl(portalCommerce.shipment_document_url || "") || portalCommerce.shipment_document_data_url || "#"} target="_blank" rel="noreferrer" style={uploadLinkBtn}>
+                      Open shipment document
+                    </a>
+                  ) : null}
+                </div>
+              </div>
             </FieldTile>
           </div>
           <div style={{ ...grid3, marginBottom: 10 }}>
@@ -2044,6 +2143,32 @@ const issueActionBtn: React.CSSProperties = {
   cursor: "pointer",
   display: "inline-flex",
   alignItems: "center",
+};
+
+const uploadActionBtn: React.CSSProperties = {
+  border: "1px solid #bfdbfe",
+  background: "#eff6ff",
+  color: "#1d4ed8",
+  padding: "8px 12px",
+  borderRadius: 10,
+  fontWeight: 700,
+  fontSize: 12,
+  cursor: "pointer",
+  display: "inline-flex",
+  alignItems: "center",
+};
+
+const uploadMetaText: React.CSSProperties = {
+  fontSize: 12,
+  color: "#475569",
+  fontWeight: 600,
+};
+
+const uploadLinkBtn: React.CSSProperties = {
+  fontSize: 12,
+  color: "#1d4ed8",
+  fontWeight: 700,
+  textDecoration: "none",
 };
 
 const modalOverlay: React.CSSProperties = {
