@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Response
 from sqlalchemy.orm import Session
 
 from backend.db.database import get_db
@@ -8,6 +8,17 @@ from backend.services.monitoring_dashboard_service import get_monitoring_summary
 from backend.services.rbac import get_current_user, UserContext
 
 router = APIRouter(prefix="/monitoring-dashboard", tags=["monitoring-dashboard"])
+
+
+
+@router.options("/filters", include_in_schema=False)
+def monitoring_filters_options():
+    return Response(status_code=204)
+
+
+@router.options("/summary", include_in_schema=False)
+def monitoring_summary_options():
+    return Response(status_code=204)
 
 
 @router.get("/filters")
