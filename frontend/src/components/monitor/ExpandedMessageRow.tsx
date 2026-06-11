@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import MessageViewerPanel from "./MessageViewerPanel";
 import MessageDetailsPanel from "./MessageDetailsPanel";
-import { getAuthHeaders } from "../../utils/auth";
+import { absoluteFileUrl } from "../../api/apiClient";
+import { apiFetch, parseApiError } from "../../utils/api";
 import type {
   MonitoringRow,
   ActivityLog,
@@ -16,8 +17,6 @@ type BBox = {
   height: number;
   page?: number;
 };
-
-const API_BASE = "";
 
 export default function ExpandedMessageRow({
   row,
@@ -84,7 +83,7 @@ export default function ExpandedMessageRow({
       (row as any).xml_payload ||
       (row as any).transformedXml ||
       "";
-    const fileUrlRaw = (row as any).file_url || "";
+    const fileUrlRaw = absoluteFileUrl((row as any).file_url || "");
     let headerDetailsSource: Record<string, any> = {};
     let invoiceFieldsSource: Record<string, any> = {};
     let structuredSource: Record<string, any> = {};
@@ -822,14 +821,13 @@ export default function ExpandedMessageRow({
         return;
       }
 
-      const res = await fetch(`${API_BASE}/purchase-orders/${row.po_id}`, {
+      const res = await apiFetch(`/purchase-orders/${row.po_id}`, {
         method: "PUT",
-        headers: getAuthHeaders(),
         body: JSON.stringify(payload),
       });
 
       if (!res.ok) {
-        const err = await parseError(res);
+        const err = await parseApiError(res);
         throw new Error(err || "Save failed");
       }
 
@@ -850,26 +848,24 @@ export default function ExpandedMessageRow({
       const payload = buildUpdatePayload();
 
       if (Object.keys(payload).length > 0) {
-        const saveRes = await fetch(`${API_BASE}/purchase-orders/${row.po_id}`, {
+        const saveRes = await apiFetch(`/purchase-orders/${row.po_id}`, {
           method: "PUT",
-          headers: getAuthHeaders(),
           body: JSON.stringify(payload),
         });
 
         if (!saveRes.ok) {
-          const err = await parseError(saveRes);
+          const err = await parseApiError(saveRes);
           throw new Error(err || "Save failed");
         }
       }
 
-      const processRes = await fetch(`${API_BASE}/purchase-orders/${row.po_id}/reprocess`, {
+      const processRes = await apiFetch(`/purchase-orders/${row.po_id}/reprocess`, {
         method: "POST",
-        headers: getAuthHeaders(),
         body: JSON.stringify({}),
       });
 
       if (!processRes.ok) {
-        const err = await parseError(processRes);
+        const err = await parseApiError(processRes);
         throw new Error(err || "Reprocess failed");
       }
 
@@ -890,14 +886,13 @@ export default function ExpandedMessageRow({
     try {
       setUiMessage(null);
 
-      const res = await fetch(`${API_BASE}/purchase-orders/${row.po_id}/archive`, {
+      const res = await apiFetch(`/purchase-orders/${row.po_id}/archive`, {
         method: "POST",
-        headers: getAuthHeaders(),
         body: JSON.stringify({ reason, comment }),
       });
 
       if (!res.ok) {
-        const err = await parseError(res);
+        const err = await parseApiError(res);
         throw new Error(err || "Archive failed");
       }
 

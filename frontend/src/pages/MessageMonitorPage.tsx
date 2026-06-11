@@ -11,7 +11,8 @@ import {
 } from "react-icons/fa";
 import ExpandedMessageRow from "components/monitor/ExpandedMessageRow";
 import "./message-monitor-premium.css";
-import { getAuthHeaders } from "utils/auth";
+import { apiFetch, parseApiError } from "utils/api";
+import { absoluteFileUrl } from "../api/apiClient";
 import { useAppScope } from "context/AppScopeContext";
 
 type MonitorRow = {
@@ -67,8 +68,6 @@ type ProcessingStep = {
   created_at?: string;
 };
 
-const API_BASE = "";
-
 export default function MessageMonitorPage() {
   const { scope, setEnvironmentScope } = useAppScope();
   const [searchParams] = useSearchParams();
@@ -113,6 +112,7 @@ export default function MessageMonitorPage() {
 
   function normalizeMonitorRow(row: any): MonitorRow {
     if (!row) return row;
+    const normalizedFileUrl = absoluteFileUrl(row.fileUrl || row.file_url || "");
 
     return {
       ...row,
@@ -134,7 +134,8 @@ export default function MessageMonitorPage() {
       direction: row.direction || row.message_direction || row.flow_direction || undefined,
       environment: row.environment || "PROD",
       receivedAt: row.receivedAt || row.received_at || row.created_at || "",
-      fileUrl: row.fileUrl || row.file_url || undefined,
+      file_url: normalizedFileUrl || undefined,
+      fileUrl: normalizedFileUrl || undefined,
       fileName: row.fileName || row.file_name || undefined,
       mimeType: row.mimeType || row.mime_type || undefined,
       rawText: row.rawText || row.raw_text || undefined,
@@ -181,10 +182,10 @@ export default function MessageMonitorPage() {
         params.set("po_id", initialPoId);
       }
       console.log("statusFilter sent =", statusFilter);
-      const res = await fetch(`${API_BASE}/monitoring/queue?${params.toString()}`, {
-        headers: getAuthHeaders(),
+      const res = await apiFetch(`/monitoring/queue?${params.toString()}`, {
         cache: "no-store",
       });
+      if (!res.ok) throw new Error(await parseApiError(res));
       const data = await res.json();
       console.log("first queue row after refresh =", Array.isArray(data) ? data[0] : data);
       const nextRows = Array.isArray(data) ? data : data.items || [];
@@ -272,7 +273,8 @@ export default function MessageMonitorPage() {
 
   async function loadActivityLogs(poId: string) {
     try {
-      const res = await fetch(`${API_BASE}/monitoring/${poId}/activity-logs`, { headers: getAuthHeaders() });
+      const res = await apiFetch(`/monitoring/${poId}/activity-logs`);
+      if (!res.ok) throw new Error(await parseApiError(res));
       const data = await res.json();
       setActivityLogsByPo((prev) => ({
         ...prev,
@@ -286,7 +288,8 @@ export default function MessageMonitorPage() {
 
   async function loadProcessingFlow(poId: string) {
     try {
-      const res = await fetch(`${API_BASE}/monitoring/${poId}/processing-flow`, { headers: getAuthHeaders() });
+      const res = await apiFetch(`/monitoring/${poId}/processing-flow`);
+      if (!res.ok) throw new Error(await parseApiError(res));
       const data = await res.json();
       setProcessingFlowByPo((prev) => ({
         ...prev,

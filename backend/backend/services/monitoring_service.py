@@ -221,7 +221,7 @@ class MonitoringService:
             try:
                 results.append(self._serialize_po(db, row))
             except Exception:
-                continue
+                results.append(self._serialize_po_fallback(row))
 
         if not results and po_id:
             fallback_row = (
@@ -495,6 +495,66 @@ class MonitoringService:
         return output.getvalue()
 
 
+
+    def _serialize_po_fallback(self, row: Any) -> dict[str, Any]:
+        def _safe_iso(dt):
+            try:
+                return dt.isoformat() if dt else None
+            except Exception:
+                return None
+
+        resolved_document_number = (
+            getattr(row, "po_number", None)
+            or getattr(row, "docnum", None)
+            or str(getattr(row, "po_id", "") or "")
+        )
+        resolved_message_type = (
+            getattr(row, "message_type", None)
+            or getattr(row, "po_type", None)
+            or getattr(row, "order_type", None)
+            or "ORDERS"
+        )
+        resolved_message_family = (
+            getattr(row, "message_family", None)
+            or getattr(row, "po_type", None)
+            or "PO"
+        )
+
+        return {
+            "po_id": str(getattr(row, "po_id")),
+            "file_id": str(getattr(row, "file_id")) if getattr(row, "file_id", None) else None,
+            "client_id": str(getattr(row, "client_id", "") or ""),
+            "po_number": resolved_document_number,
+            "document_number": resolved_document_number,
+            "docnum": getattr(row, "docnum", None) or resolved_document_number,
+            "supplier_name": getattr(row, "supplier_name", None),
+            "status": getattr(row, "status", None),
+            "sender": getattr(row, "sender", None),
+            "receiver": getattr(row, "receiver", None),
+            "direction": self._infer_direction(row),
+            "environment": getattr(row, "environment", None),
+            "source_type": getattr(row, "source_type", None),
+            "message_type": resolved_message_type,
+            "message_family": resolved_message_family,
+            "po_type": getattr(row, "po_type", None),
+            "order_type": getattr(row, "order_type", None),
+            "transaction_id": getattr(row, "docnum", None) or resolved_document_number,
+            "po_confidence": getattr(row, "po_confidence", None),
+            "created_at": _safe_iso(getattr(row, "created_at", None)),
+            "received_at": _safe_iso(getattr(row, "received_at", None)),
+            "processed_at": _safe_iso(getattr(row, "processed_at", None)),
+            "delivered_at": _safe_iso(getattr(row, "delivered_at", None)),
+            "file_url": None,
+            "mime_type": None,
+            "file_name": None,
+            "raw_text": getattr(row, "raw_text", None),
+            "xml_payload": getattr(row, "xml_payload", None),
+            "items": [],
+            "mappings": [],
+            "sold_to_partner": None,
+            "ship_to_partner": None,
+            "delivery_partner": None,
+        }
 
     def _serialize_po(self, db: Session, row: Any) -> dict[str, Any]:
         def _safe_iso(dt):
