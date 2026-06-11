@@ -1049,12 +1049,24 @@ class MonitoringService:
             preview_text = None
         preview_raw_text = preview_text or getattr(row, "raw_text", None)
         file_url = None if preview_payload_source not in [None, ""] else (f"http://127.0.0.1:8000/files/{file_id}/download" if file_id else None)
+        is_buyer_portal = source_type == "BUYER_PORTAL"
         file_name = (
             f"{(resolved_document_number or getattr(row, 'docnum', None) or getattr(row, 'po_number', None) or row.po_id)}.txt"
             if preview_payload_source not in [None, ""]
-            else getattr(file_row, "original_file_name", None)
+            else (
+                getattr(file_row, "original_file_name", None)
+                or (
+                    f"{(resolved_document_number or getattr(row, 'docnum', None) or getattr(row, 'po_number', None) or row.po_id)}.json"
+                    if is_buyer_portal
+                    else None
+                )
+            )
         )
-        base_mime_type = getattr(file_row, "mime_type", None) or getattr(row, "target_content_type", None) or "application/pdf"
+        base_mime_type = (
+            getattr(file_row, "mime_type", None)
+            or getattr(row, "target_content_type", None)
+            or ("application/json" if is_buyer_portal else "application/pdf")
+        )
         explicit_message_type = str(getattr(row, "message_type", None) or "").upper()
         document_family_seed = str(
             resolved_message_family_field
