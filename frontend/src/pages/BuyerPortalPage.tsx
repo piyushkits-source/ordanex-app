@@ -605,16 +605,6 @@ export default function BuyerPortalPage({ clientId: propClientId }: Props) {
     setGalleryIndex(0);
   }
 
-  function openMonitorOrder(order: BuyerPortalOrder) {
-    const targetEnvironment = String(order.environment || storefrontEnvironment || "PROD").toUpperCase();
-    const params = new URLSearchParams({
-      po_id: order.po_id,
-      client_id: order.client_id || clientId,
-      environment: targetEnvironment,
-    });
-    window.open(`/monitoring?${params.toString()}`, "_blank", "noopener,noreferrer");
-  }
-
   async function verifyBuyerAccess() {
     const normalizedEmail = buyerEmail.trim().toLowerCase();
     if (!clientId) {
@@ -1285,14 +1275,8 @@ export default function BuyerPortalPage({ clientId: propClientId }: Props) {
                   <div style={mutedText}>Payment: {submittedOrder.payment_status || "Pending"}</div>
                   <div style={mutedText}>Method: {submittedOrder.payment_method || paymentMethod || paymentProvider}</div>
                   <div style={mutedText}>Reference: {submittedOrder.payment_reference || "Awaiting buyer update"}</div>
-                  <div style={{ display: "flex", justifyContent: "flex-end" }}>
-                    <button
-                      type="button"
-                      onClick={() => openMonitorOrder(submittedOrder)}
-                      style={ghostButton}
-                    >
-                      Open in Message Monitor
-                    </button>
+                  <div style={mutedSmall}>
+                    Client-side order handling, shipment updates, invoice updates, and status progression continue inside the Ordanex workspace.
                   </div>
                   {submittedOrder.payment_proof_name || submittedOrder.payment_proof_url || submittedOrder.payment_proof_data_url ? (
                     <div style={detailCard}>
@@ -1368,13 +1352,6 @@ export default function BuyerPortalPage({ clientId: propClientId }: Props) {
                             style={ghostButton}
                           >
                             View details
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => openMonitorOrder(order)}
-                            style={ghostButton}
-                          >
-                            Open in Monitor
                           </button>
                         </div>
                       </div>

@@ -96,6 +96,9 @@ export default function MessageMonitorPage() {
     Record<string, ProcessingStep[]>
   >({});
   const isRefreshingRef = useRef(false);
+  const effectiveClientId = initialPoId
+    ? (initialClientId || scope.clientId || "")
+    : (scope.clientId || initialClientId || "");
   function resolveMessageType(row: any): string {
     return (
       row?.messageType ||
@@ -171,10 +174,8 @@ export default function MessageMonitorPage() {
         fromDate,
         toDate,
       });
-      if (scope.clientId) {
-        params.set("client_id", scope.clientId);
-      } else if (initialClientId) {
-        params.set("client_id", initialClientId);
+      if (effectiveClientId) {
+        params.set("client_id", effectiveClientId);
       }
       if (initialPoId) {
         params.set("po_id", initialPoId);
@@ -195,7 +196,7 @@ export default function MessageMonitorPage() {
       isRefreshingRef.current = false;
       setLoading(false);
     }
-  }, [direction, environment, fromDate, initialClientId, initialPoId, scope.clientId, search, statusFilter, toDate]);
+  }, [direction, effectiveClientId, environment, fromDate, initialPoId, search, statusFilter, toDate]);
 
   useEffect(() => {
     setEnvironment(initialEnvironment || scope.environment || "PROD");

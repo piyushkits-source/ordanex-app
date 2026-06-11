@@ -104,7 +104,7 @@ export default function TopBar() {
               fontSize: 13,
             }}
           >
-            Open storefront
+            Open buyer portal
           </button>
         ) : null}
         <UserMenu />

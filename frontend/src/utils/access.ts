@@ -28,6 +28,7 @@ const ROLE_ACCESS: Record<string, AppModuleKey[]> = {
     "buyer_storefront",
   ],
   client_admin: [
+    "monitoring",
     "trading_partners",
     "users",
     "reports",
