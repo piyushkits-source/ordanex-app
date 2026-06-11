@@ -15,6 +15,7 @@ import type {
   ProcessingStep,
 } from "../../types/monitoring";
 import { getAuthHeaders } from "../../utils/auth";
+import { apiFetch, parseApiError } from "../../utils/api";
 
 type Props = {
   row: MonitoringRow;
@@ -201,14 +202,12 @@ export default function MessageDetailsPanel({
 
     let active = true;
     setPortalCommerceLoading(true);
-    fetch(`/buyer-portal/orders/${row.po_id}`, {
-      headers: getAuthHeaders(),
+    apiFetch(`/buyer-portal/orders/${row.po_id}`, {
       cache: "no-store",
     })
       .then(async (res) => {
         if (!res.ok) {
-          const text = await res.text();
-          throw new Error(text || "Failed to load portal order commerce details.");
+          throw new Error(await parseApiError(res));
         }
         return res.json();
       })
@@ -336,16 +335,14 @@ export default function MessageDetailsPanel({
           shipment_notes: portalCommerce.shipment_notes || undefined,
         },
       };
-      const res = await fetch(`/buyer-portal/orders/${row.po_id}/commerce`, {
+      const res = await apiFetch(`/buyer-portal/orders/${row.po_id}/commerce`, {
         method: "PATCH",
-        headers: getAuthHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify(payload),
       });
-      const raw = await res.text();
-      const data = raw ? JSON.parse(raw) : {};
       if (!res.ok) {
-        throw new Error(data?.detail || data?.message || raw || "Failed to update invoice and shipment details.");
+        throw new Error(await parseApiError(res));
       }
+      await res.json();
       setPortalCommerceMessage({
         type: "success",
         text: "Portal-managed invoice and shipment details updated.",
