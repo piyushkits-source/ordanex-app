@@ -64,6 +64,12 @@ def login(payload: schemas.LoginRequest, db: Session = Depends(get_db)):
             detail="Invalid email or password",
         )
 
+    login_timestamp = datetime.now(timezone.utc)
+    user.last_login_at = login_timestamp
+    user.updated_at = login_timestamp
+    db.add(user)
+    db.commit()
+
     client = (
         db.query(models.Client)
         .filter(models.Client.client_id == user.client_id)

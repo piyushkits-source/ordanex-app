@@ -1460,12 +1460,12 @@ export default function ClientStorefrontSection({ client, onBanner }: Props) {
               <div style={fieldCard}>
                 <div style={fieldLabel}>Unit price</div>
                 <input
+                  key={`${selectedCatalogItem.sku}-unit-price`}
                   style={input}
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={selectedCatalogItem.unit_price ?? 0}
-                  onChange={(e) =>
+                  type="text"
+                  inputMode="decimal"
+                  defaultValue={selectedCatalogItem.unit_price ?? 0}
+                  onBlur={(e) =>
                     upsertSelectedCatalogItem((item) => ({
                       ...item,
                       unit_price: parseNumber(e.target.value) ?? 0,
@@ -1476,12 +1476,13 @@ export default function ClientStorefrontSection({ client, onBanner }: Props) {
               <div style={fieldCard}>
                 <div style={fieldLabel}>Currency</div>
                 <input
+                  key={`${selectedCatalogItem.sku}-currency`}
                   style={input}
-                  value={selectedCatalogItem.currency || "USD"}
-                  onChange={(e) =>
+                  defaultValue={selectedCatalogItem.currency || "USD"}
+                  onBlur={(e) =>
                     upsertSelectedCatalogItem((item) => ({
                       ...item,
-                      currency: e.target.value.toUpperCase(),
+                      currency: e.target.value.trim().toUpperCase() || null,
                     }))
                   }
                 />
@@ -1489,12 +1490,13 @@ export default function ClientStorefrontSection({ client, onBanner }: Props) {
               <div style={fieldCard}>
                 <div style={fieldLabel}>UOM</div>
                 <input
+                  key={`${selectedCatalogItem.sku}-uom`}
                   style={input}
-                  value={selectedCatalogItem.uom || "EA"}
-                  onChange={(e) =>
+                  defaultValue={selectedCatalogItem.uom || "EA"}
+                  onBlur={(e) =>
                     upsertSelectedCatalogItem((item) => ({
                       ...item,
-                      uom: e.target.value.toUpperCase(),
+                      uom: e.target.value.trim().toUpperCase() || null,
                     }))
                   }
                 />
