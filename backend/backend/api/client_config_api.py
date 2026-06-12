@@ -14,13 +14,18 @@ from sqlalchemy.orm import Session
 from backend.db.database import get_db
 from backend.db import models, schemas
 from backend.services.entitlement_service import get_client_entitlements
-from backend.services.rbac import require_roles
+from backend.services.rbac import require_roles, enforce_client_scope, UserContext
 
 router = APIRouter(
     prefix="/client-config",
     tags=["Client Config"],
-    dependencies=[Depends(require_roles("super_admin"))],
+    dependencies=[Depends(require_roles("super_admin", "client_admin"))],
 )
+
+
+def _require_super_admin(current_user: UserContext) -> None:
+    if current_user.role != "super_admin":
+        raise HTTPException(status_code=403, detail="Only super admins can manage this configuration.")
 
 
 def _sync_key_from_connection(row: models.ClientConnection) -> str | None:
@@ -590,11 +595,23 @@ def _build_storefront_catalog_template() -> bytes:
 
 
 @router.get("/clients", response_model=list[schemas.ClientRead])
-def get_clients(db: Session = Depends(get_db)):
-    return db.query(models.Client).order_by(models.Client.client_name.asc()).all()
+def get_clients(
+    db: Session = Depends(get_db),
+    current_user: UserContext = Depends(require_roles("super_admin", "client_admin")),
+):
+    query = db.query(models.Client)
+    if current_user.role != "super_admin":
+        enforce_client_scope(current_user, current_user.client_id)
+        query = query.filter(models.Client.client_id == current_user.client_id)
+    return query.order_by(models.Client.client_name.asc()).all()
 
 @router.post("/clients", response_model=schemas.ClientRead)
-def create_client(payload: schemas.ClientCreate, db: Session = Depends(get_db)):
+def create_client(
+    payload: schemas.ClientCreate,
+    db: Session = Depends(get_db),
+    current_user: UserContext = Depends(require_roles("super_admin", "client_admin")),
+):
+    _require_super_admin(current_user)
     existing = db.query(models.Client).filter(models.Client.client_id == payload.client_id).first()
     if existing:
         raise HTTPException(status_code=400, detail="Client already exists")
@@ -605,7 +622,13 @@ def create_client(payload: schemas.ClientCreate, db: Session = Depends(get_db)):
     return row
 
 @router.put("/clients/{client_id}", response_model=schemas.ClientRead)
-def update_client(client_id: str, payload: schemas.ClientUpdate, db: Session = Depends(get_db)):
+def update_client(
+    client_id: str,
+    payload: schemas.ClientUpdate,
+    db: Session = Depends(get_db),
+    current_user: UserContext = Depends(require_roles("super_admin", "client_admin")),
+):
+    _require_super_admin(current_user)
     row = db.query(models.Client).filter(models.Client.client_id == client_id).first()
     if not row:
         raise HTTPException(status_code=404, detail="Client not found")
@@ -637,7 +660,12 @@ def _profile_section_payload(row: models.ClientConfig | None) -> dict[str, Any]:
 
 
 @router.get("/client-profile-details/{client_id}", response_model=schemas.ClientProfileDetailsRead)
-def get_client_profile_details(client_id: str, db: Session = Depends(get_db)):
+def get_client_profile_details(
+    client_id: str,
+    db: Session = Depends(get_db),
+    current_user: UserContext = Depends(require_roles("super_admin", "client_admin")),
+):
+    enforce_client_scope(current_user, client_id)
     client = db.query(models.Client).filter(models.Client.client_id == client_id).first()
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
@@ -656,7 +684,9 @@ def upsert_client_profile_details(
     client_id: str,
     payload: schemas.ClientProfileDetailsUpdate,
     db: Session = Depends(get_db),
+    current_user: UserContext = Depends(require_roles("super_admin", "client_admin")),
 ):
+    enforce_client_scope(current_user, client_id)
     client = db.query(models.Client).filter(models.Client.client_id == client_id).first()
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
@@ -798,7 +828,9 @@ def get_buyer_storefront_access(
     client_id: str,
     environment: str | None = Query(None),
     db: Session = Depends(get_db),
+    current_user: UserContext = Depends(require_roles("super_admin", "client_admin")),
 ):
+    enforce_client_scope(current_user, client_id)
     row = _buyer_storefront_access_row(db, client_id, environment)
     entitlements = get_client_entitlements(db, client_id)
     config = row.config_value_json if row and isinstance(row.config_value_json, dict) else {}
@@ -823,7 +855,9 @@ def update_buyer_storefront_access(
     payload: dict[str, Any],
     environment: str | None = Query(None),
     db: Session = Depends(get_db),
+    current_user: UserContext = Depends(require_roles("super_admin", "client_admin")),
 ):
+    enforce_client_scope(current_user, client_id)
     if "enabled" not in payload:
         raise HTTPException(status_code=400, detail="'enabled' is required")
 
@@ -859,7 +893,9 @@ def get_buyer_storefront_settings(
     client_id: str,
     environment: str | None = Query(None),
     db: Session = Depends(get_db),
+    current_user: UserContext = Depends(require_roles("super_admin", "client_admin")),
 ):
+    enforce_client_scope(current_user, client_id)
     row = _buyer_storefront_settings_row(db, client_id, environment)
     settings = row.config_value_json if row and isinstance(row.config_value_json, dict) else {}
     return {
@@ -875,7 +911,9 @@ def update_buyer_storefront_settings(
     payload: dict[str, Any],
     environment: str | None = Query(None),
     db: Session = Depends(get_db),
+    current_user: UserContext = Depends(require_roles("super_admin", "client_admin")),
 ):
+    enforce_client_scope(current_user, client_id)
     row = _ensure_buyer_storefront_settings_row(db, client_id, environment)
 
     current = row.config_value_json if isinstance(row.config_value_json, dict) else {}
@@ -933,7 +971,9 @@ def publish_buyer_storefront_settings(
     from_environment: str = Query("STAGING"),
     to_environment: str = Query("PROD"),
     db: Session = Depends(get_db),
+    current_user: UserContext = Depends(require_roles("super_admin", "client_admin")),
 ):
+    _require_super_admin(current_user)
     source_environment = _normalize_storefront_environment(from_environment)
     target_environment = _normalize_storefront_environment(to_environment)
     if source_environment == target_environment:
@@ -1172,7 +1212,9 @@ def get_client_commercial_settings(
     client_id: str,
     environment: str | None = Query(None),
     db: Session = Depends(get_db),
+    current_user: UserContext = Depends(require_roles("super_admin", "client_admin")),
 ):
+    _require_super_admin(current_user)
     return _load_commercial_settings_payload(db, client_id, environment)
 
 
@@ -1182,7 +1224,9 @@ def update_client_commercial_settings(
     payload: schemas.ClientCommercialSettingsUpdate,
     environment: str | None = Query(None),
     db: Session = Depends(get_db),
+    current_user: UserContext = Depends(require_roles("super_admin", "client_admin")),
 ):
+    _require_super_admin(current_user)
     env = _commercial_environment(environment)
     row = _ensure_commercial_setting_row(db, client_id, env)
     row.source_mode = str(payload.source_mode or "ORDANEX_MASTER").strip().upper()
@@ -1281,7 +1325,9 @@ def publish_client_commercial_settings(
     from_environment: str = Query("STAGING"),
     to_environment: str = Query("PROD"),
     db: Session = Depends(get_db),
+    current_user: UserContext = Depends(require_roles("super_admin", "client_admin")),
 ):
+    _require_super_admin(current_user)
     source_environment = _commercial_environment(from_environment)
     target_environment = _commercial_environment(to_environment)
     if source_environment == target_environment:
@@ -1459,7 +1505,12 @@ def sync_buyer_storefront_catalog(
 
 
 @router.get("/verticals/{client_id}", response_model=list[schemas.VerticalRead])
-def get_verticals(client_id: str, db: Session = Depends(get_db)):
+def get_verticals(
+    client_id: str,
+    db: Session = Depends(get_db),
+    current_user: UserContext = Depends(require_roles("super_admin", "client_admin")),
+):
+    _require_super_admin(current_user)
     return (
         db.query(models.BusinessVertical)
         .filter(models.BusinessVertical.client_id == client_id)
@@ -1468,7 +1519,12 @@ def get_verticals(client_id: str, db: Session = Depends(get_db)):
     )
 
 @router.post("/verticals", response_model=schemas.VerticalRead)
-def create_vertical(payload: schemas.VerticalCreate, db: Session = Depends(get_db)):
+def create_vertical(
+    payload: schemas.VerticalCreate,
+    db: Session = Depends(get_db),
+    current_user: UserContext = Depends(require_roles("super_admin", "client_admin")),
+):
+    _require_super_admin(current_user)
     row = models.BusinessVertical(**payload.model_dump())
     db.add(row)
     db.commit()
@@ -1476,7 +1532,13 @@ def create_vertical(payload: schemas.VerticalCreate, db: Session = Depends(get_d
     return row
 
 @router.put("/verticals/{vertical_id}", response_model=schemas.VerticalRead)
-def update_vertical(vertical_id: str, payload: schemas.VerticalUpdate, db: Session = Depends(get_db)):
+def update_vertical(
+    vertical_id: str,
+    payload: schemas.VerticalUpdate,
+    db: Session = Depends(get_db),
+    current_user: UserContext = Depends(require_roles("super_admin", "client_admin")),
+):
+    _require_super_admin(current_user)
     row = db.query(models.BusinessVertical).filter(models.BusinessVertical.vertical_id == vertical_id).first()
     if not row:
         raise HTTPException(status_code=404, detail="Business vertical not found")
@@ -1488,7 +1550,12 @@ def update_vertical(vertical_id: str, payload: schemas.VerticalUpdate, db: Sessi
     return row
 
 @router.get("/connections/{client_id}", response_model=list[schemas.ClientConnectionRead])
-def get_connections(client_id: str, db: Session = Depends(get_db)):
+def get_connections(
+    client_id: str,
+    db: Session = Depends(get_db),
+    current_user: UserContext = Depends(require_roles("super_admin", "client_admin")),
+):
+    _require_super_admin(current_user)
     return (
         db.query(models.ClientConnection)
         .filter(models.ClientConnection.client_id == client_id)
@@ -1497,7 +1564,12 @@ def get_connections(client_id: str, db: Session = Depends(get_db)):
     )
 
 @router.post("/connections", response_model=schemas.ClientConnectionRead)
-def create_connection(payload: schemas.ClientConnectionCreate, db: Session = Depends(get_db)):
+def create_connection(
+    payload: schemas.ClientConnectionCreate,
+    db: Session = Depends(get_db),
+    current_user: UserContext = Depends(require_roles("super_admin", "client_admin")),
+):
+    _require_super_admin(current_user)
     row = models.ClientConnection(**payload.model_dump())
     db.add(row)
     db.commit()
@@ -1520,7 +1592,13 @@ def create_connection(payload: schemas.ClientConnectionCreate, db: Session = Dep
     return row
 
 @router.put("/connections/{connection_id}", response_model=schemas.ClientConnectionRead)
-def update_connection(connection_id: str, payload: schemas.ClientConnectionUpdate, db: Session = Depends(get_db)):
+def update_connection(
+    connection_id: str,
+    payload: schemas.ClientConnectionUpdate,
+    db: Session = Depends(get_db),
+    current_user: UserContext = Depends(require_roles("super_admin", "client_admin")),
+):
+    _require_super_admin(current_user)
     row = db.query(models.ClientConnection).filter(models.ClientConnection.connection_id == connection_id).first()
     if not row:
         raise HTTPException(status_code=404, detail="Connection not found")
@@ -1547,7 +1625,12 @@ def update_connection(connection_id: str, payload: schemas.ClientConnectionUpdat
     return row
 
 @router.get("/erp/{client_id}", response_model=list[schemas.ClientERPConfigRead])
-def get_erp_configs(client_id: str, db: Session = Depends(get_db)):
+def get_erp_configs(
+    client_id: str,
+    db: Session = Depends(get_db),
+    current_user: UserContext = Depends(require_roles("super_admin", "client_admin")),
+):
+    _require_super_admin(current_user)
     return (
         db.query(models.ClientERPConfig)
         .filter(models.ClientERPConfig.client_id == client_id)
@@ -1556,7 +1639,12 @@ def get_erp_configs(client_id: str, db: Session = Depends(get_db)):
     )
 
 @router.post("/erp", response_model=schemas.ClientERPConfigRead)
-def create_erp_config(payload: schemas.ClientERPConfigCreate, db: Session = Depends(get_db)):
+def create_erp_config(
+    payload: schemas.ClientERPConfigCreate,
+    db: Session = Depends(get_db),
+    current_user: UserContext = Depends(require_roles("super_admin", "client_admin")),
+):
+    _require_super_admin(current_user)
     row = models.ClientERPConfig(**payload.model_dump())
     db.add(row)
     db.commit()
@@ -1578,7 +1666,13 @@ def create_erp_config(payload: schemas.ClientERPConfigCreate, db: Session = Depe
     return row
 
 @router.put("/erp/{erp_config_id}", response_model=schemas.ClientERPConfigRead)
-def update_erp_config(erp_config_id: str, payload: schemas.ClientERPConfigUpdate, db: Session = Depends(get_db)):
+def update_erp_config(
+    erp_config_id: str,
+    payload: schemas.ClientERPConfigUpdate,
+    db: Session = Depends(get_db),
+    current_user: UserContext = Depends(require_roles("super_admin", "client_admin")),
+):
+    _require_super_admin(current_user)
     row = db.query(models.ClientERPConfig).filter(models.ClientERPConfig.erp_config_id == erp_config_id).first()
     if not row:
         raise HTTPException(status_code=404, detail="ERP config not found")

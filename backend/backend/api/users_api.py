@@ -33,6 +33,24 @@ class ActiveStatusRequest(BaseModel):
 class ResetPasswordRequest(BaseModel):
     password: str
 
+class UpdateUserRequest(BaseModel):
+    client_id: str | None = None
+    role: str | None = None
+    password: str | None = None
+    is_active: bool | None = None
+
+
+def _manageable_roles(current_user: UserContext) -> set[str]:
+    if current_user.role == "super_admin":
+        return {"super_admin", "client_admin", "it_admin", "business_user"}
+    return {"client_admin", "it_admin", "business_user"}
+
+
+def _assert_manageable_role(current_user: UserContext, role: str | None):
+    normalized = str(role or "").strip()
+    if normalized not in _manageable_roles(current_user):
+        raise HTTPException(status_code=403, detail="Not authorized to manage this role")
+
 @router.get("")
 def list_users(
     client_id: str | None = None,
@@ -71,8 +89,11 @@ def create_user(
     db: Session = Depends(get_db),
     current_user: UserContext = Depends(require_roles("super_admin", "client_admin")),
 ):
+    target_client_id = payload.client_id
     if current_user.role != "super_admin":
-        enforce_client_scope(current_user, payload.client_id)
+        target_client_id = current_user.client_id
+    enforce_client_scope(current_user, target_client_id)
+    _assert_manageable_role(current_user, payload.role)
 
     env = (payload.environment or current_environment()).strip().lower()
     existing = (
@@ -85,7 +106,7 @@ def create_user(
         raise HTTPException(status_code=400, detail="User already exists")
 
     user = models.User(
-        client_id=payload.client_id,
+        client_id=target_client_id,
         environment=env,
         email=payload.email,
         password_hash=hash_password(payload.password),
@@ -97,6 +118,50 @@ def create_user(
     db.commit()
     db.refresh(user)
     return {"message": "User created successfully", "email": user.email, "user_id": str(user.user_id)}
+
+@router.put("/{email}")
+def update_user(
+    email: str,
+    payload: UpdateUserRequest,
+    environment: str | None = None,
+    db: Session = Depends(get_db),
+    current_user: UserContext = Depends(require_roles("super_admin", "client_admin")),
+):
+    env = (environment or current_environment()).strip().lower()
+    user = _find_user_by_email_and_environment(db, email, env)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    enforce_client_scope(current_user, user.client_id)
+    _assert_manageable_role(current_user, user.role)
+
+    target_client_id = user.client_id
+    if current_user.role == "super_admin" and payload.client_id is not None:
+        target_client_id = payload.client_id
+    target_role = payload.role or user.role
+
+    enforce_client_scope(current_user, target_client_id)
+    _assert_manageable_role(current_user, target_role)
+
+    if current_user.role == "super_admin" and payload.client_id is not None:
+        user.client_id = payload.client_id
+    if payload.role is not None:
+        user.role = payload.role
+    if payload.is_active is not None:
+        user.is_active = payload.is_active
+    if payload.password:
+        user.password_hash = hash_password(payload.password)
+
+    db.commit()
+    return {
+        "message": "User updated successfully",
+        "email": email,
+        "environment": env,
+        "client_id": user.client_id,
+        "role": user.role,
+        "is_active": bool(user.is_active),
+    }
+
 
 @router.put("/{email}/active")
 def set_user_active(
@@ -111,8 +176,8 @@ def set_user_active(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    if current_user.role != "super_admin":
-        enforce_client_scope(current_user, user.client_id)
+    enforce_client_scope(current_user, user.client_id)
+    _assert_manageable_role(current_user, user.role)
 
     user.is_active = payload.is_active
     db.commit()
@@ -136,8 +201,8 @@ def reset_password(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    if current_user.role != "super_admin":
-        enforce_client_scope(current_user, user.client_id)
+    enforce_client_scope(current_user, user.client_id)
+    _assert_manageable_role(current_user, user.role)
 
     user.password_hash = hash_password(payload.password)
     db.commit()
@@ -159,8 +224,8 @@ def delete_user(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    if current_user.role != "super_admin":
-        enforce_client_scope(current_user, user.client_id)
+    enforce_client_scope(current_user, user.client_id)
+    _assert_manageable_role(current_user, user.role)
 
     db.delete(user)
     db.commit()

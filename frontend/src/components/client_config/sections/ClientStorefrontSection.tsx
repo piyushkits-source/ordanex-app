@@ -54,6 +54,8 @@ type CatalogItem = {
 const API = "/client-config";
 const MAX_IMAGE_BYTES = 2 * 1024 * 1024;
 const MAX_VIDEO_BYTES = 8 * 1024 * 1024;
+const LEGACY_PAYMENT_GUIDANCE = "Collect payment directly with the supplier using the methods listed on the storefront.";
+const DEFAULT_PAYMENT_GUIDANCE = "Make payment directly to the supplier using the methods listed on the storefront.";
 
 function isImageFile(file: File) {
   return file.type.startsWith("image/") || /\.(png|jpe?g|webp|gif|bmp|svg)$/i.test(file.name);
@@ -84,6 +86,12 @@ function normalizeMethodCsv(value: string) {
     .map((item) => item.trim())
     .filter(Boolean)
     .join(", ");
+}
+
+function normalizePaymentGuidanceText(value: unknown) {
+  const text = String(value || "").trim();
+  if (!text || text === LEGACY_PAYMENT_GUIDANCE) return DEFAULT_PAYMENT_GUIDANCE;
+  return text;
 }
 
 function normalizeCatalogKey(value: string) {
@@ -412,8 +420,7 @@ export default function ClientStorefrontSection({ client, onBanner }: Props) {
     payment_terms: "Net 30",
     payment_link_url: "",
     payment_link_label: "Pay supplier",
-    payment_instructions:
-      "Collect payment directly with the supplier using the methods listed on the storefront.",
+    payment_instructions: DEFAULT_PAYMENT_GUIDANCE,
     payment_proof_instructions:
       "Ask buyers to share their transaction id, UTR number, or payment confirmation after they complete payment.",
     show_product_specs: "YES",
@@ -529,9 +536,9 @@ export default function ClientStorefrontSection({ client, onBanner }: Props) {
         payment_terms: payments.payment_terms || "Net 30",
         payment_link_url: payments.payment_link_url || "",
         payment_link_label: payments.payment_link_label || "Pay supplier",
-        payment_instructions:
-          payments.instructions ||
-          "Collect payment directly with the supplier using the methods listed on the storefront.",
+        payment_instructions: normalizePaymentGuidanceText(
+          payments.instructions || DEFAULT_PAYMENT_GUIDANCE,
+        ),
         payment_proof_instructions:
           payments.proof_of_payment_instructions ||
           "Ask buyers to share their transaction id, UTR number, or payment confirmation after they complete payment.",
@@ -825,7 +832,7 @@ export default function ClientStorefrontSection({ client, onBanner }: Props) {
           payment_terms: form.payment_terms,
           payment_link_url: form.payment_link_url,
           payment_link_label: form.payment_link_label,
-          instructions: form.payment_instructions,
+          instructions: normalizePaymentGuidanceText(form.payment_instructions),
           proof_of_payment_instructions: form.payment_proof_instructions,
         },
         experience: {

@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
+import { getAuth, getPostLoginPath } from "../utils/auth";
 import {
   fetchBuyerAccess,
   fetchBuyerCatalog,
@@ -33,6 +34,23 @@ type TrackingStep = {
 };
 
 const MAX_PAYMENT_PROOF_BYTES = 4 * 1024 * 1024;
+const LEGACY_PAYMENT_GUIDANCE = "Collect payment directly with the supplier using the methods listed on the storefront.";
+const DEFAULT_PAYMENT_GUIDANCE = "Make payment directly to the supplier using the methods listed on the storefront.";
+const INVOICE_ISSUED_PAYMENT_STATUS = "Invoice issued - awaiting buyer payment";
+
+function normalizePaymentGuidanceText(value?: string | null) {
+  const text = String(value || "").trim();
+  if (!text || text === LEGACY_PAYMENT_GUIDANCE) return DEFAULT_PAYMENT_GUIDANCE;
+  return text;
+}
+
+function normalizeBuyerPaymentStatus(value?: string | null, hasInvoice = false) {
+  const text = String(value || "").trim();
+  if ((!text || text === "Awaiting supplier invoice") && hasInvoice) {
+    return INVOICE_ISSUED_PAYMENT_STATUS;
+  }
+  return text;
+}
 
 function resolveClientId(explicitClientId?: string) {
   if (explicitClientId) return explicitClientId;
@@ -322,6 +340,8 @@ export default function BuyerPortalPage({ clientId: propClientId }: Props) {
     [params.environment],
   );
   const storefrontEnvironmentLabel = storefrontEnvironment === "staging" ? "Staging" : "Production";
+  const workspaceAuth = getAuth();
+  const workspaceHomePath = workspaceAuth ? getPostLoginPath(workspaceAuth.role) : "";
   const [accessState, setAccessState] = useState<any>(null);
   const [accessLoading, setAccessLoading] = useState(true);
   const [approvalChecking, setApprovalChecking] = useState(false);
@@ -542,8 +562,7 @@ export default function BuyerPortalPage({ clientId: propClientId }: Props) {
   const paymentTerms = payments.payment_terms || "Net 30";
   const paymentLinkUrl = String(payments.payment_link_url || "").trim();
   const paymentLinkLabel = String(payments.payment_link_label || "Pay supplier").trim() || "Pay supplier";
-  const paymentInstructions =
-    payments.instructions || "Collect payment directly with the supplier using the configured methods.";
+  const paymentInstructions = normalizePaymentGuidanceText(payments.instructions || DEFAULT_PAYMENT_GUIDANCE);
   const paymentProofInstructions =
     payments.proof_of_payment_instructions || "Share your UTR, transaction id, or payment confirmation after completing payment.";
   const sellerMode = String(commerce.seller_mode || "ERP_INTEGRATED").toUpperCase();
@@ -563,6 +582,11 @@ export default function BuyerPortalPage({ clientId: propClientId }: Props) {
       ? "A protected buying surface for supplier-managed commerce."
       : "A buyer-friendly portal powered by the Ordanex transaction backbone.";
 
+  const submittedOrderPaymentStatus = normalizeBuyerPaymentStatus(
+    submittedOrder?.payment_status,
+    Boolean(submittedOrder?.invoice?.invoice_number),
+  );
+
   const trackingSteps =
     Array.isArray(submittedOrder?.tracking_steps) && submittedOrder?.tracking_steps.length
       ? submittedOrder.tracking_steps
@@ -570,12 +594,12 @@ export default function BuyerPortalPage({ clientId: propClientId }: Props) {
           submittedOrder,
           sellerMode,
           paymentsEnabled,
-          submittedOrder?.payment_status ||
+          submittedOrderPaymentStatus ||
             (paymentsEnabled
               ? paymentReference
                 ? "Payment captured"
                 : paymentMode === "INVOICE_LATER"
-                  ? "Awaiting supplier invoice"
+                  ? INVOICE_ISSUED_PAYMENT_STATUS
                   : paymentMode === "PAYMENT_LINK"
                     ? "Awaiting payment through secure link"
                     : "Awaiting payment confirmation"
@@ -705,6 +729,16 @@ export default function BuyerPortalPage({ clientId: propClientId }: Props) {
     if (typeof window !== "undefined" && clientId) {
       window.sessionStorage.removeItem(buyerAccessStorageKey(clientId, storefrontEnvironment));
     }
+  }
+
+  function handlePortalLogout() {
+    resetBuyerAccess();
+    setBanner("Buyer session cleared. Enter an approved buyer email to open the protected catalog again.");
+  }
+
+  function handleOpenWorkspace() {
+    if (!workspaceHomePath || typeof window === "undefined") return;
+    window.location.assign(workspaceHomePath);
   }
 
   async function openOrderDetails(orderId: string) {
@@ -898,8 +932,16 @@ export default function BuyerPortalPage({ clientId: propClientId }: Props) {
                 </span>
                 <span style={brandPill}>{approvedBuyerEmail}</span>
                 <span style={brandPill}>{supplierDisplayName}</span>
+                {workspaceHomePath ? (
+                  <button type="button" onClick={handleOpenWorkspace} style={ghostButton}>
+                    Open workspace
+                  </button>
+                ) : null}
                 <button type="button" onClick={resetBuyerAccess} style={ghostButton}>
                   Switch buyer email
+                </button>
+                <button type="button" onClick={handlePortalLogout} style={ghostButton}>
+                  Logout
                 </button>
               </div>
             </div>
@@ -1321,7 +1363,7 @@ export default function BuyerPortalPage({ clientId: propClientId }: Props) {
                     </div>
                     <span style={{ ...statusPill, ...statusColor(submittedOrder.status) }}>{submittedOrder.status || "NEW"}</span>
                   </div>
-                  <div style={mutedText}>Payment: {submittedOrder.payment_status || "Pending"}</div>
+                  <div style={mutedText}>Payment: {submittedOrderPaymentStatus || "Pending"}</div>
                   <div style={mutedText}>Method: {submittedOrder.payment_method || paymentMethod || paymentProvider}</div>
                   <div style={mutedText}>Reference: {submittedOrder.payment_reference || "Awaiting buyer update"}</div>
                   <div style={mutedSmall}>
@@ -1353,7 +1395,7 @@ export default function BuyerPortalPage({ clientId: propClientId }: Props) {
                         Amount: {submittedOrder.invoice.invoice_amount != null ? money(submittedOrder.invoice.invoice_amount, submittedOrder.invoice.currency || currency) : "Pending"}
                       </div>
                       <div style={mutedText}>Due date: {submittedOrder.invoice.due_date || "Pending"}</div>
-                      <div style={mutedText}>Payment status: {submittedOrder.invoice.payment_status || submittedOrder.payment_status || "Pending"}</div>
+                      <div style={mutedText}>Payment status: {normalizeBuyerPaymentStatus(submittedOrder.invoice.payment_status || submittedOrderPaymentStatus, Boolean(submittedOrder.invoice.invoice_number)) || "Pending"}</div>
                       {submittedOrder.invoice.invoice_url ? <a href={absoluteFileUrl(submittedOrder.invoice.invoice_url)} target="_blank" rel="noreferrer" style={linkCta}>Open invoice</a> : null}
                     </div>
                   ) : null}
@@ -1389,7 +1431,7 @@ export default function BuyerPortalPage({ clientId: propClientId }: Props) {
                         </div>
                         <span style={{ ...statusPill, ...statusColor(order.status) }}>{order.status || "NEW"}</span>
                       </div>
-                      <div style={mutedText}>{order.payment_status || "Payment pending"}</div>
+                      <div style={mutedText}>{normalizeBuyerPaymentStatus(order.payment_status, Boolean(order.invoice?.invoice_number)) || "Payment pending"}</div>
                       <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginTop: 10 }}>
                         <div style={mutedSmall}>
                           {order.environment ? `Environment: ${order.environment}` : `Environment: ${storefrontEnvironmentLabel}`}

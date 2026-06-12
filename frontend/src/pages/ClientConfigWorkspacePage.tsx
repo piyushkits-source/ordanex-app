@@ -8,6 +8,7 @@ import ClientErpMessagesSection from "components/client_config/sections/ClientEr
 import ClientStorefrontSection from "components/client_config/sections/ClientStorefrontSection";
 import ClientCommercialSection from "components/client_config/sections/ClientCommercialSection";
 import { apiFetch, parseApiError } from "utils/api";
+import { getAuth } from "utils/auth";
 import { useAppScope } from "context/AppScopeContext";
 
 const API_BASE = "/client-config";
@@ -43,8 +44,14 @@ export default function ClientConfigWorkspacePage() {
   const [createMode, setCreateMode] = useState(false);
   const [clientSearch, setClientSearch] = useState("");
 
+  const auth = getAuth();
+  const isSuperAdmin = String(auth?.role || "").toLowerCase() === "super_admin";
   const { scope, setClientScope, setVerticalScope, setEnvironmentScope } = useAppScope();
   const isProductionSelected = String(scope.environment || "PROD").toUpperCase() === "PROD";
+  const visibleSections = useMemo(
+    () => (isSuperAdmin ? sections : sections.filter((section) => section.key === "CLIENT" || section.key === "STOREFRONT")),
+    [isSuperAdmin],
+  );
 
   const selectedClient = useMemo(
     () => clients.find((c) => c.client_id === selectedClientId) || null,
@@ -85,6 +92,12 @@ export default function ClientConfigWorkspacePage() {
       setCreateMode(false);
     }
   }, [createMode, isProductionSelected]);
+
+  useEffect(() => {
+    if (!visibleSections.some((section) => section.key === activeSection)) {
+      setActiveSection(visibleSections[0]?.key || "CLIENT");
+    }
+  }, [activeSection, visibleSections]);
 
   async function loadClients() {
     try {
@@ -135,6 +148,10 @@ export default function ClientConfigWorkspacePage() {
   }
 
   function handleNewClient() {
+    if (!isSuperAdmin) {
+      setBanner({ type: "info", text: "Only super admins can create a new client." });
+      return;
+    }
     if (isProductionSelected) {
       setBanner({ type: "info", text: "Switch to Staging to create a new client." });
       return;
@@ -204,7 +221,7 @@ export default function ClientConfigWorkspacePage() {
               <option value="STAGING">Staging</option>
             </select>
             <div style={statusChip}>{createMode ? "Create Mode" : "Workspace Mode"}</div>
-            <div style={statusChipMuted}>{sections.find((s) => s.key === activeSection)?.label}</div>
+            <div style={statusChipMuted}>{visibleSections.find((s) => s.key === activeSection)?.label}</div>
           </div>
         </div>
       </div>
@@ -219,7 +236,7 @@ export default function ClientConfigWorkspacePage() {
         <div style={leftPanel}>
           <div style={panelTopRow}>
             <div style={panelTitle}>Clients</div>
-            {!isProductionSelected ? (
+            {!isProductionSelected && isSuperAdmin ? (
               <button type="button" onClick={handleNewClient} style={newButton}>
                 + New Client
               </button>
@@ -272,7 +289,7 @@ export default function ClientConfigWorkspacePage() {
         <div style={midPanel}>
           <div style={panelTitle}>Sections</div>
           <div style={{ display: "grid", gap: 8 }}>
-            {sections.map((section) => {
+            {visibleSections.map((section) => {
               const active = activeSection === section.key;
               const disabled = createMode && section.key !== "CLIENT";
               return (

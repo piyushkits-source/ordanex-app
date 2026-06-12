@@ -29,6 +29,7 @@ const ROLE_ACCESS: Record<string, AppModuleKey[]> = {
   ],
   client_admin: [
     "monitoring",
+    "client_config",
     "trading_partners",
     "users",
     "reports",
@@ -44,31 +45,62 @@ const ROLE_ACCESS: Record<string, AppModuleKey[]> = {
   ],
 };
 
-// Subscription scaffolding is centralized here so views/sessions can be
-// managed consistently once plan-to-feature mapping is finalized.
+// Subscription access is centralized here so each plan has a visible
+// product surface, not just a pricing-page distinction.
 const SUBSCRIPTION_ACCESS: Record<string, AppModuleKey[]> = {
-  basic: ["monitoring"],
-  standard: ["monitoring", "business_rules"],
-  enterprise: [
+  basic: [
     "monitoring",
-    "business_rules",
+    "client_config",
+    "users",
+    "buyer_storefront",
+  ],
+  standard: [
+    "monitoring",
+    "client_config",
     "trading_partners",
     "users",
+    "reports",
+    "analytics",
+    "buyer_storefront",
+  ],
+  enterprise: [
+    "monitoring",
+    "client_config",
+    "trading_partners",
+    "users",
+    "connections",
+    "business_rules",
     "reports",
     "analytics",
     "buyer_storefront",
   ],
   premium: [
     "monitoring",
-    "business_rules",
+    "client_config",
     "trading_partners",
     "users",
+    "connections",
+    "business_rules",
     "reports",
     "analytics",
     "bulk_onboarding",
     "agentic_support",
     "buyer_storefront",
   ],
+};
+
+const MODULE_LABELS: Record<AppModuleKey, string> = {
+  monitoring: "Message Monitor",
+  client_config: "Client Configuration",
+  trading_partners: "Trading Partners",
+  users: "User Management",
+  connections: "Connections",
+  business_rules: "Business Rules",
+  reports: "Reports",
+  analytics: "Analytics",
+  bulk_onboarding: "Bulk Onboarding",
+  agentic_support: "Agentic Support",
+  buyer_storefront: "Buyer Storefront",
 };
 
 export function normalizeRole(role?: string | null): string {
@@ -108,6 +140,12 @@ export function getAccessibleModules(auth: AuthUser | null | undefined): AppModu
   return modules.filter((moduleKey) =>
     canAccessModule(auth, moduleKey)
   );
+}
+
+export function getSubscriptionFeatureLabels(subscription?: string | null): string[] {
+  const normalized = normalizeSubscription(subscription);
+  const modules = SUBSCRIPTION_ACCESS[normalized] || [];
+  return modules.map((moduleKey) => MODULE_LABELS[moduleKey]);
 }
 
 export function getDefaultRouteForAuth(auth: AuthUser | null | undefined): string {

@@ -168,7 +168,7 @@ DEFAULT_STOREFRONT_SETTINGS = {
         "payment_link_url": "",
         "payment_link_label": "Pay supplier",
         "proof_of_payment_instructions": "Share your transaction id, UTR number, or payment confirmation after completing payment.",
-        "instructions": "Collect payment directly with the supplier using the methods listed on the storefront.",
+        "instructions": "Make payment directly to the supplier using the methods listed on the storefront.",
     },
     "experience": {
         "show_product_specs": True,
@@ -1348,20 +1348,24 @@ class BuyerPortalService:
         payment_mode: str,
         payment_reference: str | None,
         existing_status: str | None = None,
+        invoice_number: str | None = None,
     ) -> str:
-        if existing_status:
-            text = str(existing_status).strip()
-            if text:
-                return text
+        text = str(existing_status or "").strip()
+        normalized_existing = text.upper()
+        normalized_invoice = str(invoice_number or "").strip()
+        if text and normalized_existing != "AWAITING SUPPLIER INVOICE":
+            return text
         if not payments_enabled:
             return "Commercial terms handled directly with the supplier"
         if payment_reference:
             return "Payment reference received"
+        if normalized_invoice:
+            return "Invoice issued - awaiting buyer payment"
         if payment_mode == "PAYMENT_LINK":
             return "Awaiting payment through secure link"
         if payment_mode == "OFFLINE_TRANSFER":
             return "Awaiting remittance confirmation"
-        return "Awaiting supplier invoice"
+        return text or "Awaiting supplier invoice"
 
     def _tracking_status(self, done: bool, active: bool) -> str:
         if done:
@@ -1380,6 +1384,7 @@ class BuyerPortalService:
             payment_mode=str(meta.get("payment_mode") or "INVOICE_LATER").strip().upper(),
             payment_reference=meta.get("payment_reference"),
             existing_status=invoice.get("payment_status") or meta.get("payment_status"),
+            invoice_number=invoice.get("invoice_number"),
         )
         order_status = str(po.status or "").strip().upper()
         processed = bool(po.processed_at)
@@ -1470,6 +1475,7 @@ class BuyerPortalService:
             payment_mode=str(meta.get("payment_mode") or "INVOICE_LATER").strip().upper(),
             payment_reference=(payment or {}).get("payment_reference") or meta.get("payment_reference"),
             existing_status=(invoice or {}).get("payment_status") or meta.get("payment_status"),
+            invoice_number=(invoice or {}).get("invoice_number"),
         )
         payload.update(
             {

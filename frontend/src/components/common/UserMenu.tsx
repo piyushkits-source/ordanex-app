@@ -11,7 +11,11 @@ import {
   FaHome,
 } from "react-icons/fa";
 import { clearAuth, getAuth } from "../../utils/auth";
-import { canAccessModule, type AppModuleKey } from "../../utils/access";
+import {
+  canAccessModule,
+  getSubscriptionFeatureLabels,
+  type AppModuleKey,
+} from "../../utils/access";
 import { buildStorefrontPath, getFrontendEnvironmentLabel, workspaceEnvironmentBadge } from "../../utils/environment";
 import { useAppScope } from "../../context/AppScopeContext";
 
@@ -55,6 +59,10 @@ export default function UserMenu() {
     () => menuItems.filter((item) => canAccessModule(auth, item.moduleKey)),
     [auth]
   );
+  const planFeatureLabels = useMemo(
+    () => getSubscriptionFeatureLabels(auth?.subscription_type).slice(0, 6),
+    [auth?.subscription_type]
+  );
 
   function handleLogout() {
     clearAuth();
@@ -86,6 +94,20 @@ export default function UserMenu() {
             <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 4 }}>
               Environment: {environment}
             </div>
+            {planFeatureLabels.length ? (
+              <div style={{ marginTop: 10 }}>
+                <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 6 }}>
+                  Plan access
+                </div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                  {planFeatureLabels.map((label) => (
+                    <span key={label} style={planChip}>
+                      {label}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            ) : null}
           </div>
 
           <div style={{ display: "grid", gap: 4 }}>
@@ -206,6 +228,18 @@ const menuItemStyle: React.CSSProperties = {
   borderRadius: 10,
   fontWeight: 600,
   fontSize: 13,
+};
+
+const planChip: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  borderRadius: 999,
+  padding: "4px 8px",
+  fontSize: 10,
+  fontWeight: 700,
+  color: "#1d4ed8",
+  background: "#eff6ff",
+  border: "1px solid #bfdbfe",
 };
 
 const menuFooter: React.CSSProperties = {
