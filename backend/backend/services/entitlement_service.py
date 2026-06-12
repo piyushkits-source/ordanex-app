@@ -9,6 +9,27 @@ BUILT_IN_BUYER_STOREFRONT_PLANS = {"premium", "enterprise"}
 BUYER_STOREFRONT_CONFIG_TYPES = {"FEATURES", "FEATURE_FLAG", "BUYER_PORTAL"}
 
 
+def _normalize_environment(value: str | None) -> str:
+    normalized = str(value or "").strip().upper()
+    if normalized in {"STAGING", "STAGE", "STG"}:
+        return "STAGING"
+    return "PROD"
+
+
+def _feature_flag_keys(feature_key: str, environment: str | None) -> set[str]:
+    env = _normalize_environment(environment).lower()
+    compact = feature_key.replace("_", "")
+    dashed = feature_key.replace("_", "-")
+    return {
+        feature_key.lower(),
+        compact.lower(),
+        dashed.lower(),
+        f"{feature_key}_{env}".lower(),
+        f"{compact}_{env}".lower(),
+        f"{dashed}-{env}".lower(),
+    }
+
+
 def _normalize_flag(value) -> bool:
     if isinstance(value, bool):
         return value
@@ -33,10 +54,16 @@ def _storefront_config_rows(db: Session, client_id: str):
     )
 
 
-def _feature_flag_state(db: Session, client_id: str, feature_key: str) -> bool | None:
+def _feature_flag_state(
+    db: Session,
+    client_id: str,
+    feature_key: str,
+    environment: str | None = None,
+) -> bool | None:
+    valid_keys = _feature_flag_keys(feature_key, environment)
     for row in _storefront_config_rows(db, client_id):
         row_key = str(getattr(row, "config_key", "") or "").strip().lower()
-        if row_key not in {feature_key.lower(), feature_key.replace("_", "-").lower(), feature_key.replace("_", "").lower()}:
+        if row_key not in valid_keys:
             continue
         cfg = row.config_value_json or {}
         if "enabled" in cfg:
@@ -52,9 +79,13 @@ def _feature_flag_state(db: Session, client_id: str, feature_key: str) -> bool |
     return None
 
 
-def get_client_entitlements(db: Session, client_id: str) -> dict[str, object]:
+def get_client_entitlements(
+    db: Session,
+    client_id: str,
+    environment: str | None = None,
+) -> dict[str, object]:
     subscription = _client_subscription(db, client_id)
-    override_state = _feature_flag_state(db, client_id, BUYER_STOREFRONT_FEATURE)
+    override_state = _feature_flag_state(db, client_id, BUYER_STOREFRONT_FEATURE, environment)
 
     if override_state is False:
         buyer_storefront = False
@@ -74,5 +105,5 @@ def get_client_entitlements(db: Session, client_id: str) -> dict[str, object]:
     }
 
 
-def has_buyer_storefront_access(db: Session, client_id: str) -> bool:
-    return bool(get_client_entitlements(db, client_id).get("buyer_storefront"))
+def has_buyer_storefront_access(db: Session, client_id: str, environment: str | None = None) -> bool:
+    return bool(get_client_entitlements(db, client_id, environment).get("buyer_storefront"))

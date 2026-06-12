@@ -78,7 +78,7 @@ def login(payload: schemas.LoginRequest, db: Session = Depends(get_db)):
         else None
     )
     subscription_type = getattr(client, "subscription_type", None) if client else None
-    entitlements = get_client_entitlements(db, user.client_id) if user.client_id else {"buyer_storefront": False, "buyer_storefront_disabled": False}
+    entitlements = get_client_entitlements(db, user.client_id, env) if user.client_id else {"buyer_storefront": False, "buyer_storefront_disabled": False}
     feature_flags = [
         "buyer_storefront",
     ] if entitlements.get("buyer_storefront") else []
@@ -188,7 +188,7 @@ def me(current_user=Depends(get_current_user), db: Session = Depends(get_db)):
         if current_user.client_id
         else None
     )
-    entitlements = get_client_entitlements(db, current_user.client_id) if current_user.client_id else {"buyer_storefront": False, "buyer_storefront_disabled": False}
+    entitlements = get_client_entitlements(db, current_user.client_id, current_user.environment) if current_user.client_id else {"buyer_storefront": False, "buyer_storefront_disabled": False}
     return {
         "user_id": current_user.user_id,
         "email": current_user.email,

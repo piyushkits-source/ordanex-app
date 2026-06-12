@@ -832,7 +832,7 @@ def get_buyer_storefront_access(
 ):
     enforce_client_scope(current_user, client_id)
     row = _buyer_storefront_access_row(db, client_id, environment)
-    entitlements = get_client_entitlements(db, client_id)
+    entitlements = get_client_entitlements(db, client_id, environment)
     config = row.config_value_json if row and isinstance(row.config_value_json, dict) else {}
     explicit_enabled = _storefront_explicit_enabled(row)
     entitled = bool(entitlements.get("buyer_storefront"))
@@ -875,7 +875,7 @@ def update_buyer_storefront_access(
     db.commit()
     db.refresh(row)
 
-    entitlements = get_client_entitlements(db, client_id)
+    entitlements = get_client_entitlements(db, client_id, environment)
     entitled = bool(entitlements.get("buyer_storefront"))
     return {
         "client_id": client_id,

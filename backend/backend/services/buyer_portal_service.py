@@ -454,7 +454,7 @@ class BuyerPortalService:
         return None
 
     def _storefront_access_enabled(self, db: Session, client_id: str, environment: str | None = None) -> tuple[dict[str, Any], bool, bool | None]:
-        entitlements = get_client_entitlements(db, client_id)
+        entitlements = get_client_entitlements(db, client_id, environment)
         access_row = self._access_row(db, client_id, environment)
         explicit_enabled = self._is_storefront_explicitly_enabled(access_row)
         entitled = bool(entitlements.get("buyer_storefront"))
